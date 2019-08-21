@@ -3,9 +3,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
----
+
 title: NXP i.MXRT USDHC module
-version: 0.1
 
 description: >
     This binding specifies the NXP i.MXRT USDHC module.
@@ -24,14 +23,11 @@ properties:
       type: compound
       category: optional
       description: Power pin
-      generation: define
 
     cd-gpios:
       type: compound
       category: optional
       description: Detect pin
-      generation: define
 
     label:
       category: required
-...

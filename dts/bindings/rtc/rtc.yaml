@@ -5,7 +5,6 @@
 #
 
 title: RTC Base Structure
-version: 0.1
 
 description: >
     This binding gives the base structures for all RTC devices
@@ -25,5 +24,5 @@ properties:
 
     prescaler:
       type: int
-      category: required
+      category: optional
       description: RTC frequency equals clock-frequency divided by the prescaler value

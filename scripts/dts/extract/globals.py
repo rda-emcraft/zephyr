@@ -5,6 +5,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
+# NOTE: This file is part of the old device tree scripts, which will be removed
+# later. They are kept to generate some legacy #defines via the
+# --deprecated-only flag.
+#
+# The new scripts are gen_defines.py, edtlib.py, and dtlib.py.
+
 import sys
 
 from collections import defaultdict
@@ -24,7 +30,8 @@ old_alias_names = False
 
 regs_config = {
     'zephyr,sram'  : 'DT_SRAM',
-    'zephyr,ccm'   : 'DT_CCM'
+    'zephyr,ccm'   : 'DT_CCM',
+    'zephyr,dtcm'  : 'DT_DTCM'
 }
 
 name_config = {
@@ -44,6 +51,7 @@ def str_to_label(s):
             .replace(',', '_') \
             .replace('@', '_') \
             .replace('/', '_') \
+            .replace('.', '_') \
             .replace('+', 'PLUS') \
             .upper()
 

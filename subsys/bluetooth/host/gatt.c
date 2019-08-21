@@ -420,6 +420,15 @@ static void db_hash_gen(bool store)
 		return;
 	}
 
+	/**
+	 * Core 5.1 does not state the endianess of the hash.
+	 * However Vol 3, Part F, 3.3.1 says that multi-octet Characteristic
+	 * Values shall be LE unless otherwise defined. PTS expects hash to be
+	 * in little endianess as well. bt_smp_aes_cmac calculates the hash in
+	 * big endianess so we have to swap.
+	 */
+	sys_mem_swap(db_hash, sizeof(db_hash));
+
 	BT_HEXDUMP_DBG(db_hash, sizeof(db_hash), "Hash: ");
 
 	if (IS_ENABLED(CONFIG_BT_SETTINGS) && store) {
@@ -739,12 +748,15 @@ void bt_gatt_init(void)
 		last_static_handle += svc->attr_count;
 	}
 
-#if defined(CONFIG_BT_GATT_DYNAMIC_DB)
 #if defined(CONFIG_BT_GATT_CACHING)
 	k_delayed_work_init(&db_hash_work, db_hash_process);
-	db_hash_gen(false);
-#endif /* COFNIG_BT_GATT_CACHING */
 
+	/* Submit work to Generate initial hash as there could be static
+	 * services already in the database.
+	 */
+	k_delayed_work_submit(&db_hash_work, DB_HASH_TIMEOUT);
+#endif /* CONFIG_BT_GATT_CACHING */
+#if defined(CONFIG_BT_GATT_DYNAMIC_DB)
 	k_delayed_work_init(&gatt_sc.work, sc_process);
 #endif /* CONFIG_BT_GATT_DYNAMIC_DB */
 #if defined(CONFIG_BT_SETTINGS_CCC_STORE_ON_WRITE)
@@ -812,9 +824,18 @@ static void db_changed(void)
 			continue;
 		}
 
-		if (CF_ROBUST_CACHING(cfg) &&
-		    atomic_test_and_clear_bit(cfg->flags, CF_CHANGE_AWARE)) {
-			BT_DBG("%s change-unaware", bt_addr_le_str(&cfg->peer));
+		if (CF_ROBUST_CACHING(cfg)) {
+			/* Core Spec 5.1 | Vol 3, Part G, 2.5.2.1 Robust Caching
+			 *... the database changes again before the client
+			 * becomes change-aware in which case the error response
+			 * shall be sent again.
+			 */
+			atomic_clear_bit(cfg->flags, CF_OUT_OF_SYNC);
+			if (atomic_test_and_clear_bit(cfg->flags,
+						      CF_CHANGE_AWARE)) {
+				BT_DBG("%s change-unaware",
+				       bt_addr_le_str(&cfg->peer));
+			}
 		}
 	}
 #endif
@@ -1826,7 +1847,8 @@ static void remove_subscriptions(struct bt_conn *conn)
 		}
 
 		if (!bt_addr_le_is_bonded(conn->id, &conn->le.dst) ||
-		    (params->flags & BT_GATT_SUBSCRIBE_FLAG_VOLATILE)) {
+		    (atomic_test_bit(params->flags,
+				     BT_GATT_SUBSCRIBE_FLAG_VOLATILE))) {
 			/* Remove subscription */
 			params->value = 0U;
 			gatt_subscription_remove(conn, prev, params);
@@ -2470,8 +2492,15 @@ static void gatt_find_info_rsp(struct bt_conn *conn, u8_t err,
 		goto done;
 	}
 
+	length--;
+
+	/* Check if there is a least one descriptor in the response */
+	if (length < len) {
+		goto done;
+	}
+
 	/* Parse descriptors found */
-	for (i = (length - 1) / len, pdu = rsp->info; i != 0;
+	for (i = length / len, pdu = rsp->info; i != 0;
 	     i--, pdu = (const u8_t *)pdu + len) {
 		struct bt_gatt_attr *attr;
 
@@ -2525,11 +2554,6 @@ static void gatt_find_info_rsp(struct bt_conn *conn, u8_t err,
 		if (params->func(conn, attr, params) == BT_GATT_ITER_STOP) {
 			return;
 		}
-	}
-
-	/* Stop if could not parse the whole PDU */
-	if (i) {
-		goto done;
 	}
 
 	gatt_discover_next(conn, handle, params);
@@ -3010,6 +3034,8 @@ static void gatt_write_ccc_rsp(struct bt_conn *conn, u8_t err,
 
 	BT_DBG("err 0x%02x", err);
 
+	atomic_clear_bit(params->flags, BT_GATT_SUBSCRIBE_FLAG_WRITE_PENDING);
+
 	/* if write to CCC failed we remove subscription and notify app */
 	if (err) {
 		sys_snode_t *node, *tmp, *prev = NULL;
@@ -3046,6 +3072,8 @@ static int gatt_write_ccc(struct bt_conn *conn, u16_t handle, u16_t value,
 	net_buf_add_le16(buf, value);
 
 	BT_DBG("handle 0x%04x value 0x%04x", handle, value);
+
+	atomic_set_bit(params->flags, BT_GATT_SUBSCRIBE_FLAG_WRITE_PENDING);
 
 	return gatt_send(conn, buf, func, params, NULL);
 }
@@ -3120,6 +3148,11 @@ int bt_gatt_unsubscribe(struct bt_conn *conn,
 		if (params == tmp) {
 			found = true;
 			sys_slist_remove(&subscriptions, prev, &tmp->node);
+			/* Attempt to cancel if write is pending */
+			if (atomic_test_bit(params->flags,
+			    BT_GATT_SUBSCRIBE_FLAG_WRITE_PENDING)) {
+				bt_gatt_cancel(conn, params);
+			}
 			continue;
 		} else {
 			prev = &tmp->node;
@@ -3397,7 +3430,8 @@ int bt_gatt_store_ccc(u8_t id, const bt_addr_le_t *addr)
 		return err;
 	}
 
-	BT_DBG("Stored CCCs for %s (%s)", bt_addr_le_str(addr), key);
+	BT_DBG("Stored CCCs for %s (%s)", bt_addr_le_str(addr),
+	       log_strdup(key));
 	if (len) {
 		for (int i = 0; i < save.count; i++) {
 			BT_DBG("  CCC: handle 0x%04x value 0x%04x",

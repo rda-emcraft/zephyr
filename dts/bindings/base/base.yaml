@@ -1,6 +1,4 @@
-
 title: base device binding
-version: 0.1
 
 description: >
     Binding for device
@@ -35,3 +33,8 @@ properties:
         type: string
         category: optional
         description: Human readable string describing the device (used by Zephyr for API name)
+
+    clocks:
+        type: compound
+        category: optional
+        description: Clock gate information

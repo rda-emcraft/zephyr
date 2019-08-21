@@ -62,7 +62,7 @@ struct ssd16xx_data {
 	u8_t scan_mode;
 };
 
-#if defined(DT_GD_GDE0213B1_0)
+#if defined(DT_INST_0_GD_GDE0213B1)
 static u8_t ssd16xx_lut_initial[] = {
 	0x22, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x11,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -76,7 +76,7 @@ static u8_t ssd16xx_lut_default[] = {
 	0x0F, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00
 };
-#elif defined(DT_GD_GDE029A1_0)
+#elif defined(DT_INST_0_GD_GDE029A1)
 static u8_t ssd16xx_lut_initial[] = {
 	0x50, 0xAA, 0x55, 0xAA, 0x11, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -90,7 +90,7 @@ static u8_t ssd16xx_lut_default[] = {
 	0x00, 0x00, 0x00, 0x00, 0x13, 0x14, 0x44, 0x12,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
-#elif defined(DT_HINK_E0154A05_0)
+#elif defined(DT_INST_0_HINK_E0154A05)
 static u8_t ssd16xx_lut_initial[] = {
 	0x02, 0x02, 0x01, 0x11, 0x12, 0x12, 0x22, 0x22,
 	0x66, 0x69, 0x69, 0x59, 0x58, 0x99, 0x99, 0x88,
@@ -223,30 +223,14 @@ static void ssd16xx_set_orientation_internall(struct ssd16xx_data *driver)
 #endif
 }
 
-int ssd16xx_resume(const struct device *dev)
+static int ssd16xx_blanking_off(const struct device *dev)
 {
-	struct ssd16xx_data *driver = dev->driver_data;
-	u8_t tmp;
-
-	/*
-	 * Uncomment for voltage measurement
-	 * tmp = SSD16XX_CTRL2_ENABLE_CLK;
-	 * ssd16xx_write_cmd(SSD16XX_CMD_UPDATE_CTRL2, &tmp, sizeof(tmp));
-	 * ssd16xx_write_cmd(SSD16XX_CMD_MASTER_ACTIVATION, NULL, 0);
-	 */
-
-	tmp = SSD16XX_SLEEP_MODE_PON;
-	return ssd16xx_write_cmd(driver, SSD16XX_CMD_SLEEP_MODE,
-				 &tmp, sizeof(tmp));
+	return -ENOTSUP;
 }
 
-static int ssd16xx_suspend(const struct device *dev)
+static int ssd16xx_blanking_on(const struct device *dev)
 {
-	struct ssd16xx_data *driver = dev->driver_data;
-	u8_t tmp = SSD16XX_SLEEP_MODE_DSM;
-
-	return ssd16xx_write_cmd(driver, SSD16XX_CMD_SLEEP_MODE,
-				 &tmp, sizeof(tmp));
+	return -ENOTSUP;
 }
 
 static int ssd16xx_update_display(const struct device *dev)
@@ -655,8 +639,8 @@ static int ssd16xx_init(struct device *dev)
 static struct ssd16xx_data ssd16xx_driver;
 
 static struct display_driver_api ssd16xx_driver_api = {
-	.blanking_on = ssd16xx_resume,
-	.blanking_off = ssd16xx_suspend,
+	.blanking_on = ssd16xx_blanking_on,
+	.blanking_off = ssd16xx_blanking_off,
 	.write = ssd16xx_write,
 	.read = ssd16xx_read,
 	.get_framebuffer = ssd16xx_get_framebuffer,

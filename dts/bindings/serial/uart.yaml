@@ -1,6 +1,4 @@
-
 title: Uart Base Structure
-version: 0.1
 
 description: >
     This binding gives the base structures for all UART devices
@@ -18,11 +16,7 @@ properties:
       description: Clock frequency information for UART operation
     current-speed:
       type: int
-      category: required
-      description: Initial baud rate setting for UART
-    clocks:
-      type: array
       category: optional
-      description: Clock gate information
+      description: Initial baud rate setting for UART
     label:
       category: required

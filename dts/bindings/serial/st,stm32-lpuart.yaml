@@ -1,6 +1,4 @@
-
 title: STM32 LPUART
-version: 0.1
 
 description: >
     This binding gives a base representation of the STM32 LPUART
@@ -19,9 +17,7 @@ properties:
       category: required
 
     clocks:
-      type: array
       category: required
-      description: Clock gate information
 
     hw-flow-control:
       type: boolean

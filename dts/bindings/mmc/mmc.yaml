@@ -3,20 +3,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
----
+
 title: MMC/SDHC module
-version: 0.1
 
 description: >
     This binding specifies the MMC/SDHC module.
 
 inherits:
     !include base.yaml
-
-properties:
-    clocks:
-      type: array
-      category: optional
-      description: Clock gate information
-      generation: define
-...

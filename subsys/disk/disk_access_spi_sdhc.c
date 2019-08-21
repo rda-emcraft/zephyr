@@ -249,7 +249,11 @@ static int sdhc_spi_cmd_r1_raw(struct sdhc_spi_data *data,
 	err = sdhc_spi_skip_until_start(data);
 
 	/* Ensure there's a idle byte between commands */
-	sdhc_spi_rx_u8(data);
+	if (cmd != SDHC_SEND_CSD && cmd != SDHC_SEND_CID &&
+	    cmd != SDHC_READ_SINGLE_BLOCK && cmd != SDHC_READ_MULTIPLE_BLOCK &&
+	    cmd != SDHC_WRITE_BLOCK && cmd != SDHC_WRITE_MULTIPLE_BLOCK) {
+		sdhc_spi_rx_u8(data);
+	}
 
 	return err;
 }
@@ -704,10 +708,10 @@ static int sdhc_spi_init(struct device *dev)
 	data->cfg.operation = SPI_WORD_SET(8) | SPI_HOLD_ON_CS;
 	data->cfg.slave = DT_INST_0_ZEPHYR_MMC_SPI_SLOT_BASE_ADDRESS;
 	data->cs = device_get_binding(
-		DT_INST_0_ZEPHYR_MMC_SPI_SLOT_CS_GPIO_CONTROLLER);
+		DT_INST_0_ZEPHYR_MMC_SPI_SLOT_CS_GPIOS_CONTROLLER);
 	__ASSERT_NO_MSG(data->cs != NULL);
 
-	data->pin = DT_INST_0_ZEPHYR_MMC_SPI_SLOT_CS_GPIO_PIN;
+	data->pin = DT_INST_0_ZEPHYR_MMC_SPI_SLOT_CS_GPIOS_PIN;
 
 	disk_spi_sdhc_init(dev);
 

@@ -1,6 +1,4 @@
-
 title: Flash base node description
-version: 0.1
 
 description: >
     This binding gives a base FLASH description
@@ -19,10 +17,8 @@ properties:
      type: int
      description: address alignment required by flash erase operations
      category: optional
-     label: alignment
 
     write-block-size:
      type: int
      description: address alignment required by flash write operations
      category: optional
-     label: alignment
