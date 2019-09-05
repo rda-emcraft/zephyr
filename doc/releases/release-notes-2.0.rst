@@ -19,19 +19,72 @@ Major enhancements with this release include:
   connection between two nodes.
 * We added support for UpdateHub which is an end-to-end solution for large scale
   over-the-air update of devices.
+* We added support for ARM Cortex-R Architecture (EXPERIMENTAL).
 
 The following sections provide detailed lists of changes by component.
+
+Security Vulnerability Related
+******************************
+
+The following security vulnerability (CVE) was addressed in this
+release:
+
+* Fixes CVE-2019-9506: The Bluetooth BR/EDR specification up to and
+  including version 5.1 permits sufficiently low encryption key length
+  and does not prevent an attacker from influencing the key length
+  negotiation. This allows practical brute-force attacks (aka "KNOB")
+  that can decrypt traffic and inject arbitrary ciphertext without the
+  victim noticing.
 
 Kernel
 ******
 
-* TBD
+* New kernel API for per-thread disabling of Floating Point Services for
+  ARC, ARM Cortex-M, and x86 architectures.
+* New system call to set the clock frequency at runtime.
+* Additional support for compatibility with 64-bit architectures.
+* Userspace mutexes are now supported through the new k_futex primitive.
+* Improvements to the slab allocator.
+* Fixed the implementation of k_thread_name_set() with userspace enabled.
+* Boost the default tick rate for tickless kernels in order to improve the
+  precision of timeouts.
 
 Architectures
 *************
 
-* POSIX: Fix race condition with terminated threads which had never been
-  scheduled by kernel. On very loaded systems it could cause swap errors.
+* ARM:
+
+  * Added initial support for ARM Cortex-R architecture (EXPERIMENTAL)
+  * We enhanced the support for Floating Point Services in Cortex-M
+    architecture, implementing and enabling lazy-stacking for FPU
+    capable threads and fixing stack overflow detection for FPU
+    capable supervisor threads
+  * Added Qemu support for ARMv8-M Mainline architecture
+  * Optimized the IRQ locking time in thread context switch
+  * Fixed several critical bugs in User Mode implementation
+  * Added test coverage for ARM-specific kernel features
+  * Improved support for linking TrustZone Secure Entry functions into
+    Non-Secure firmware
+
+* ARC:
+
+  * Added support for ARC HS architecture
+  * Added SMP support for ARC HS architecture
+  * Added support for ARC SecureShield based TEE (EXPERIMENTAL)
+  * Fixed several critical bugs in interrupt and exception handling
+  * Enhance the support for Floating Point Services
+
+* POSIX:
+
+  * Fix race condition with terminated threads which had never been
+    scheduled by kernel. On very loaded systems it could cause swap errors.
+
+* x86:
+
+  * Support for the Quark microcontroller family has been dropped.
+  * A new lightweight PCI implementation has been introduced which supports
+    MSI and other features required for PCIe devices. The previous PCI
+    implementation has been deprecated and will be removed in 2.1.
 
 Boards & SoC Support
 ********************
@@ -40,8 +93,9 @@ Boards & SoC Support
 
 * Added support for the following ARC boards:
 
-  * emdsp
+  * emsdp
   * hsdk
+  * nsim for hs
 
 * Added support for the following ARM boards:
 
@@ -339,15 +393,69 @@ Networking
 Bluetooth
 *********
 
-* TBD
+* Host:
+
+  * GATT: Added support for database hashes
+  * GATT: Added support for Ready Using Characteristic UUID
+  * GATT: Added support for static services
+  * GATT: Added support for disabling the dynamic database
+  * GATT: Added support for notifying and indicating by UUID
+  * GATT: Simplified the bt_gatt_notify_cb() API
+  * GATT: Added additional attributes to the Device Information Service
+  * GATT: Several protocol and database fixes
+  * Settings: Transitioned to new, optimized settings model
+  * Settings: Support for custom backends
+  * Completed support for directed advertising
+  * Completed support for Out-Of-Band (OOB) pairing
+  * Added support for fine-grained control of security establishment, including
+    forcing a pairing procedure in case of key loss
+  * Switched to separate, dedicated pools for discardable events and number of
+    completed packets events
+  * Extended and improved the Bluetooth shell with several commands
+  * BLE qualification up to the 5.1 specification
+  * BLE Mesh: Several fixes and improvements
+
+* BLE split software Controller:
+
+  * The split software Controller is now the default
+  * Added support for the Data Length Update procedure
+  * Improved the ticker packet scheduler for improved conflict resolution
+  * Added documentation for the ticker packet scheduler
+  * Added support for out-of-tree user-defined commands and events
+  * Added support for Zephyr Vendor Specific Commands
+  * Added support for user-defined protocols
+  * Converted several control procedures to be queueable
+  * Nordic: Added support for Controller-based privacy
+  * Nordic: Decorrelated address generation from resolution
+  * Nordic: Added support for fast encryption setup
+  * Nordic: Added support for RSSI
+  * Nordic: Added support for low-latency ULL processing of messages
+  * Nordic: Added support for the nRF52811 IC BLE radio
+  * Nordic: Added support for PA/LNA on Port 1 GPIO pins
+  * Nordic: Added support for radio event abort
+  * BLE qualification up to the 5.1 specification
+  * Several bug fixes
+
+* BLE legacy software Controller:
+
+  * BLE qualification up to the 5.1 specification
+  * Multiple control procedures fixes and improvements
 
 Build and Infrastructure
 ************************
+
+* ARM Embedded Toolchain
+
+  * Changed ARM Embedded toolchain to default to nano variant of newlib
 
 * TBD
 
 Libraries / Subsystems
 ***********************
+
+* File Systems
+
+  * Added support for littlefs
 
 * TBD
 
@@ -359,12 +467,16 @@ HALs
 Documentation
 *************
 
-* TBD
+* We've made many updates to component, subsystem, and process
+  documentation bringing our documentation up-to-date with code changes,
+  additions, and improvements, as well as new supported boards and
+  samples.
 
 Tests and Samples
 *****************
 
-* TBD
+* We have implemented additional tests and significantly expanded the
+  amount of test cases in existing tests to increase code coverage.
 
 Issue Related Items
 *******************

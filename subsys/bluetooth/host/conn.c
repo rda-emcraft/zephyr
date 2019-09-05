@@ -628,7 +628,7 @@ int bt_conn_auth_pincode_entry(struct bt_conn *conn, const char *pin)
 		return -EINVAL;
 	}
 
-	if (conn->required_sec_level == BT_SECURITY_HIGH && len < 16) {
+	if (conn->required_sec_level == BT_SECURITY_L3 && len < 16) {
 		BT_WARN("PIN code for %s is not 16 bytes wide",
 			bt_addr_str(&conn->br.dst));
 		return -EPERM;
@@ -651,7 +651,7 @@ void bt_conn_pin_code_req(struct bt_conn *conn)
 	if (bt_auth && bt_auth->pincode_entry) {
 		bool secure = false;
 
-		if (conn->required_sec_level == BT_SECURITY_HIGH) {
+		if (conn->required_sec_level == BT_SECURITY_L3) {
 			secure = true;
 		}
 
@@ -744,6 +744,21 @@ static int ssp_confirm_neg_reply(struct bt_conn *conn)
 				    NULL);
 }
 
+void bt_conn_ssp_auth_complete(struct bt_conn *conn, u8_t status)
+{
+	if (!status) {
+		bool bond = !atomic_test_bit(conn->flags, BT_CONN_BR_NOBOND);
+
+		if (bt_auth && bt_auth->pairing_complete) {
+			bt_auth->pairing_complete(conn, bond);
+		}
+	} else {
+		if (bt_auth && bt_auth->pairing_failed) {
+			bt_auth->pairing_failed(conn, status);
+		}
+	}
+}
+
 void bt_conn_ssp_auth(struct bt_conn *conn, u32_t passkey)
 {
 	conn->br.pairing_method = ssp_pair_method(conn);
@@ -752,7 +767,7 @@ void bt_conn_ssp_auth(struct bt_conn *conn, u32_t passkey)
 	 * If local required security is HIGH then MITM is mandatory.
 	 * MITM protection is no achievable when SSP 'justworks' is applied.
 	 */
-	if (conn->required_sec_level > BT_SECURITY_MEDIUM &&
+	if (conn->required_sec_level > BT_SECURITY_L2 &&
 	    conn->br.pairing_method == JUST_WORKS) {
 		BT_DBG("MITM protection infeasible for required security");
 		ssp_confirm_neg_reply(conn);
@@ -969,13 +984,13 @@ u8_t bt_conn_enc_key_size(struct bt_conn *conn)
 	return 0;
 }
 
-void bt_conn_security_changed(struct bt_conn *conn)
+void bt_conn_security_changed(struct bt_conn *conn, enum bt_security_err err)
 {
 	struct bt_conn_cb *cb;
 
 	for (cb = callback_list; cb; cb = cb->_next) {
 		if (cb->security_changed) {
-			cb->security_changed(conn, conn->sec_level);
+			cb->security_changed(conn, conn->sec_level, err);
 		}
 	}
 }
@@ -988,12 +1003,12 @@ static int start_security(struct bt_conn *conn)
 			return -EBUSY;
 		}
 
-		if (conn->required_sec_level > BT_SECURITY_HIGH) {
+		if (conn->required_sec_level > BT_SECURITY_L3) {
 			return -ENOTSUP;
 		}
 
 		if (bt_conn_get_io_capa() == BT_IO_NO_INPUT_OUTPUT &&
-		    conn->required_sec_level > BT_SECURITY_MEDIUM) {
+		    conn->required_sec_level > BT_SECURITY_L2) {
 			return -EINVAL;
 		}
 
@@ -1025,7 +1040,7 @@ static int start_security(struct bt_conn *conn)
 	}
 }
 
-int bt_conn_security(struct bt_conn *conn, bt_security_t sec)
+int bt_conn_set_security(struct bt_conn *conn, bt_security_t sec)
 {
 	int err;
 
@@ -1034,7 +1049,7 @@ int bt_conn_security(struct bt_conn *conn, bt_security_t sec)
 	}
 
 	if (IS_ENABLED(CONFIG_BT_SMP_SC_ONLY) &&
-	    sec < BT_SECURITY_FIPS) {
+	    sec < BT_SECURITY_L4) {
 		return -EOPNOTSUPP;
 	}
 
@@ -1043,7 +1058,9 @@ int bt_conn_security(struct bt_conn *conn, bt_security_t sec)
 		return 0;
 	}
 
-	conn->required_sec_level = sec;
+	atomic_set_bit_to(conn->flags, BT_CONN_FORCE_PAIR,
+			  sec & BT_SECURITY_FORCE_PAIR);
+	conn->required_sec_level = sec & ~BT_SECURITY_FORCE_PAIR;
 
 	err = start_security(conn);
 
@@ -1181,6 +1198,17 @@ int bt_conn_send_cb(struct bt_conn *conn, struct net_buf *buf,
 static bool conn_tx_internal(bt_conn_tx_cb_t cb)
 {
 	if (cb == att_pdu_sent || cb == att_cfm_sent || cb == att_rsp_sent ||
+#if defined(CONFIG_BT_SMP)
+#if defined(CONFIG_BT_PRIVACY)
+	    cb == smp_id_sent ||
+#endif /* CONFIG_BT_PRIVACY */
+#if defined(CONFIG_BT_SIGNING)
+	    cb == smp_sign_info_sent ||
+#endif /* CONFIG_BT_SIGNING */
+#if !defined(CONFIG_BT_SMP_SC_PAIR_ONLY)
+	    cb == smp_ident_sent ||
+#endif /* CONFIG_BT_SMP_SC_PAIR_ONLY */
+#endif /* CONFIG_BT_SMP */
 #if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
 	    cb == l2cap_chan_sdu_sent ||
 #endif /* CONFIG_BT_L2CAP_DYNAMIC_CHANNEL */
@@ -1496,8 +1524,8 @@ struct bt_conn *bt_conn_add_le(const bt_addr_le_t *peer)
 
 	bt_addr_le_copy(&conn->le.dst, peer);
 #if defined(CONFIG_BT_SMP)
-	conn->sec_level = BT_SECURITY_LOW;
-	conn->required_sec_level = BT_SECURITY_LOW;
+	conn->sec_level = BT_SECURITY_L1;
+	conn->required_sec_level = BT_SECURITY_L1;
 #endif /* CONFIG_BT_SMP */
 	conn->type = BT_CONN_TYPE_LE;
 	conn->le.interval_min = BT_GAP_INIT_CONN_INT_MIN;
@@ -2295,7 +2323,8 @@ int bt_conn_le_conn_update(struct bt_conn *conn,
 	return bt_hci_cmd_send(BT_HCI_OP_LE_CONN_UPDATE, buf);
 }
 
-struct net_buf *bt_conn_create_pdu(struct net_buf_pool *pool, size_t reserve)
+struct net_buf *bt_conn_create_pdu_timeout(struct net_buf_pool *pool,
+					   size_t reserve, s32_t timeout)
 {
 	struct net_buf *buf;
 
@@ -2310,24 +2339,29 @@ struct net_buf *bt_conn_create_pdu(struct net_buf_pool *pool, size_t reserve)
 	}
 
 	if (IS_ENABLED(CONFIG_BT_DEBUG_CONN) ||
-	    k_current_get() == &k_sys_work_q.thread) {
+	    (k_current_get() == &k_sys_work_q.thread && timeout == K_FOREVER)) {
 		buf = net_buf_alloc(pool, K_NO_WAIT);
 		if (!buf) {
-			BT_WARN("Unable to allocate buffer");
+			BT_WARN("Unable to allocate buffer with K_NO_WAIT");
 			/* Cannot block with K_FOREVER on k_sys_work_q as that
 			 * can cause a deadlock when trying to dispatch TX
 			 * notification.
 			 */
 			if (k_current_get() == &k_sys_work_q.thread) {
+				BT_WARN("Unable to allocate buffer: timeout %d",
+					 timeout);
 				return NULL;
 			}
-			buf = net_buf_alloc(pool, K_FOREVER);
+			buf = net_buf_alloc(pool, timeout);
 		}
 	} else {
-		buf = net_buf_alloc(pool, K_FOREVER);
+		buf = net_buf_alloc(pool, timeout);
 	}
 
-	__ASSERT_NO_MSG(buf);
+	if (!buf) {
+		BT_WARN("Unable to allocate buffer: timeout %d", timeout);
+		return NULL;
+	}
 
 	reserve += sizeof(struct bt_hci_acl_hdr) + CONFIG_BT_HCI_RESERVE;
 	net_buf_reserve(buf, reserve);
@@ -2440,7 +2474,7 @@ int bt_conn_auth_cancel(struct bt_conn *conn)
 			return ssp_passkey_neg_reply(conn);
 		case PASSKEY_DISPLAY:
 			return bt_conn_disconnect(conn,
-						  BT_HCI_ERR_AUTHENTICATION_FAIL);
+						  BT_HCI_ERR_AUTH_FAIL);
 		case LEGACY:
 			return pin_code_neg_reply(&conn->br.dst);
 		default:
