@@ -27,7 +27,7 @@
 #define NB_OF_SAMPLES			256
 #define NB_OF_CHANNELS			2
 #define SINGLE_SAMPLE_SIZE_BYTES	2
-#define FRAME_CLOCK_FREQUENCY_HZ	48000
+#define FRAME_CLOCK_FREQUENCY_HZ	4000
 
 //#define TRANSFER_BLOCK_TIME_US		((BLOCK_SIZE_BYTES * 8 * 1000000) / FRAME_CLOCK_FREQUENCY_HZ)
 #define TRANSFER_BLOCK_TIME_MS		(BLOCK_SIZE_BYTES * 1000 / (FRAME_CLOCK_FREQUENCY_HZ * NB_OF_CHANNELS * SINGLE_SAMPLE_SIZE_BYTES))
@@ -260,9 +260,9 @@ void main(void)
 		 }
 #ifdef USE_RX
 		 if (rx_started) {
-
 			 ret = i2s_read(dev, &my_rx_buf, &rcv_size);
-
+			 u16_t *mb16 = (u16_t*)my_rx_buf;
+			 //printk("%u, %p: %04X %04X\r\n", rcv_size, mb16, mb16[15], mb16[16]);
 			 if (ret != 0) {
 				printk("r");
 			 }

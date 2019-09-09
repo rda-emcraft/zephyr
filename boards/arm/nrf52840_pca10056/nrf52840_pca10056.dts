@@ -202,8 +202,8 @@ arduino_spi: &spi3 {
 	mck-pin = <27>;
         sck-pin = <31>;
         lrck-pin = <28>;
-        sdout-pin = <30>;
-        sdin-pin = <29>;
+        sdout-pin = <29>;
+        sdin-pin = <30>;
 };
 
 &flash0 {
