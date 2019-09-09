@@ -890,6 +890,8 @@ static int channel_tx_start()
 	key = irq_lock();
 	if (i2s->get_state() == I2S_IF_RUNNING) {
 		LOG_INF1("\r\n[%s]I2S_IF_RUNNING\r\n", __func__);
+		ret = ch_tx->get_data(ch_tx, (u32_t**)&i2s->buffers.p_tx_buffer,
+				      &i2s->size);
 		ret = i2s->restart();
 		irq_unlock(key);
 		if (ret != 0) {
@@ -939,6 +941,9 @@ static int channel_rx_start()
 	key = irq_lock();
 	if (i2s->get_state() == I2S_IF_RUNNING) {
 		LOG_INF1("\r\n[%s]I2S_IF_RUNNING\r\n", __func__);
+		ret = k_mem_slab_alloc(ch_rx->mem_slab,
+				       (void**)&i2s->buffers.p_rx_buffer,
+				       K_NO_WAIT);
 		ret = i2s->restart();
 		irq_unlock(key);
 		if (ret != 0) {
@@ -1212,7 +1217,7 @@ static void isr(void *arg)
 	u32_t *inten = base + 0x300;
 	u32_t *intenset = base + 0x304;
 	u32_t *intenclr = base + 0x308;
-	LOG_INF1("t:%u r:%u s:%u", *ev_txupd, *ev_rxupd, *ev_stopped);
+	LOG_INF1("\r\nt:%u r:%u s:%u\r\n", *ev_txupd, *ev_rxupd, *ev_stopped);
 	/* pass the interrupt to nrfx */
 	nrfx_i2s_irq_handler();
 	if (i2s->get_state() == I2S_IF_STARTING) {

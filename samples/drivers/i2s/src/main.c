@@ -262,7 +262,7 @@ void main(void)
 		 if (rx_started) {
 			 ret = i2s_read(dev, &my_rx_buf, &rcv_size);
 			 u16_t *mb16 = (u16_t*)my_rx_buf;
-			 //printk("%u, %p: %04X %04X\r\n", rcv_size, mb16, mb16[15], mb16[16]);
+			 printk("%u, %p: %04X %04X\r\n", rcv_size, mb16, mb16[15], mb16[16]);
 			 if (ret != 0) {
 				printk("r");
 			 }
