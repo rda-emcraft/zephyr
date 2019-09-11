@@ -287,7 +287,7 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 
 		if ((p_new_buffers.p_rx_buffer == NULL)
 		    && (p_new_buffers.p_tx_buffer == NULL)) {
-			LOG_ERR("\r\nboth p_new_buffers are NULL\r\n", __func__);
+			LOG_ERR("\r\n[%s]both p_new_buffers are NULL\r\n", __func__);
 			nrfx_i2s_stop();
 			//NRFX_I2S_REPORT_ERROR(INTERNAL);
 			return;
@@ -750,7 +750,6 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			    enum i2s_trigger_cmd cmd)
 {
 	struct i2s_nrfx_data *const dev_data = DEV_DATA(dev);
-	const struct i2s_nrfx_config *const dev_const_cfg = DEV_CFG(dev);
 	struct channel_str *channel;
 	int ret;
 
@@ -1187,6 +1186,7 @@ static int i2s_nrfx_channel_get(enum i2s_dir dir,
 		*channel = &dev_data->channel_tx;
 		break;
 	default:
+		*channel = NULL;
 		LOG_ERR("Either RX or TX direction must be selected");
 		return -EINVAL;
 	}
@@ -1211,12 +1211,12 @@ static void isr(void *arg)
 {
 	struct i2s_nrfx_interface *i2s = get_interface();
 	u32_t base = 0x40025000;
-	u32_t *ev_txupd = base + 0x114;
-	u32_t *ev_rxupd = base + 0x104;
-	u32_t *ev_stopped = base + 0x108;
-	u32_t *inten = base + 0x300;
-	u32_t *intenset = base + 0x304;
-	u32_t *intenclr = base + 0x308;
+	u32_t *ev_txupd = (u32_t*)(base + 0x114);
+	u32_t *ev_rxupd = (u32_t*)(base + 0x104);
+	u32_t *ev_stopped = (u32_t*)(base + 0x108);
+	u32_t *inten = (u32_t*)(base + 0x300);
+	u32_t *intenset = (u32_t*)(base + 0x304);
+	u32_t *intenclr = (u32_t*)(base + 0x308);
 	LOG_INF1("\r\nt:%u r:%u s:%u\r\n", *ev_txupd, *ev_rxupd, *ev_stopped);
 	/* pass the interrupt to nrfx */
 	nrfx_i2s_irq_handler();
@@ -1249,9 +1249,9 @@ static void setup_instance_0(struct device *dev)
 	queue_init(&dev_data->channel_rx.mem_block_queue,
 		   CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1, &rx_1_ring_buf[0]);
 
-	IRQ_CONNECT(DT_NORDIC_NRF_I2S_DT_I2S_0_IRQ,
-		    DT_NORDIC_NRF_I2S_DT_I2S_0_IRQ_PRIORITY, isr, 0, 0);
-	irq_enable(DT_NORDIC_NRF_I2S_DT_I2S_0_IRQ);
+	IRQ_CONNECT(DT_INST_0_NORDIC_NRF_I2S_IRQ_0,
+		    DT_INST_0_NORDIC_NRF_I2S_IRQ_0_PRIORITY, isr, 0, 0);
+	irq_enable(DT_INST_0_NORDIC_NRF_I2S_IRQ_0);
 }
 
 static const struct i2s_nrfx_config zephyr_i2s_cfg_0 = {
