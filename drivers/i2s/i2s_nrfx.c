@@ -18,8 +18,8 @@ LOG_MODULE_REGISTER(i2s_nrfx);
 #else
 void f(u8_t *x, ...) {}
 #define LOG_ERR	/*printk("\r\n--");*/printk
-#define LOG_INF1 printk
-#define LOG_MEM	printk
+#define LOG_INF1 f//printk
+#define LOG_MEM	f//printk
 #endif
 
 #define NRFX_I2S_REPORT_ERROR(err_code)
@@ -102,13 +102,11 @@ struct channel_str {
 	struct queue mem_block_queue;
 	int (*start)(void);
 	int (*stop)(void);
-#warning this is nullptr
 	int (*drop)(struct channel_str *);
 	int (*drain)(struct channel_str *);
 	void (*data_handler)(nrfx_i2s_buffers_t const *p_released, u32_t status,
 			     nrfx_i2s_buffers_t *p_new_buffers);
-	int (*get_data)(struct channel_str *config, u32_t **buf,
-			size_t *block_size);
+	int (*get_data)(u32_t **buf, size_t *block_size);
 };
 
 struct i2s_nrfx_data {
@@ -889,8 +887,11 @@ static int channel_tx_start()
 	key = irq_lock();
 	if (i2s->get_state() == I2S_IF_RUNNING) {
 		LOG_INF1("\r\n[%s]I2S_IF_RUNNING\r\n", __func__);
-		ret = ch_tx->get_data(ch_tx, (u32_t**)&i2s->buffers.p_tx_buffer,
-				      &i2s->size);
+		ret = ch_tx->get_data((u32_t **)&i2s->buffers.p_tx_buffer, &i2s->size);
+		if (ret != 0) {
+			LOG_ERR("[%s]Can't get data", __func__);
+			return ret;
+		}
 		ret = i2s->restart();
 		irq_unlock(key);
 		if (ret != 0) {
@@ -900,8 +901,7 @@ static int channel_tx_start()
 	}
 	else if (i2s->get_state() == I2S_IF_READY) {
 		LOG_INF1("\r\n[%s]I2S_IF_READY\r\n", __func__);
-		ret = ch_tx->get_data(ch_tx, (u32_t**)&i2s->buffers.p_tx_buffer,
-				      &i2s->size);
+		ret = ch_tx->get_data((u32_t **)&i2s->buffers.p_tx_buffer, &i2s->size);
 		if (ret != 0) {
 			irq_unlock(key);
 			LOG_ERR("[%s]Can't get data", __func__);
@@ -931,7 +931,6 @@ static int channel_rx_start()
 	int ret;
 	unsigned int key;
 	struct channel_str * const ch_rx = i2s->channel_rx;
-#pragma message "czy tu zmiana stanu kanalu? czy pozniej?"
 	ret = channel_change_state(ch_rx, I2S_STATE_RUNNING);
 	if (ret != 0) {
 		return ret;
@@ -943,6 +942,11 @@ static int channel_rx_start()
 		ret = k_mem_slab_alloc(ch_rx->mem_slab,
 				       (void**)&i2s->buffers.p_rx_buffer,
 				       K_NO_WAIT);
+		if (ret != 0) {
+			irq_unlock(key);
+			LOG_ERR("[%s]Can't allocate slab", __func__);
+			return ret;
+		}
 		ret = i2s->restart();
 		irq_unlock(key);
 		if (ret != 0) {
@@ -957,7 +961,7 @@ static int channel_rx_start()
 				       K_NO_WAIT);
 		if (ret != 0) {
 			irq_unlock(key);
-			LOG_ERR("[%s]Can't get data", __func__);
+			LOG_ERR("[%s]Can't allocate slab", __func__);
 			return ret;
 		}
 		ret = i2s->start();
@@ -1037,8 +1041,7 @@ static bool channel_check_empty(struct channel_str *channel)
 }
 
 
-static int channel_tx_get_data(struct channel_str *config, u32_t **buf,
-			       size_t *block_size)
+static int channel_tx_get_data(u32_t **buf, size_t *block_size)
 {
 	struct channel_str *ch_tx = get_interface()->channel_tx;
 	int ret;
@@ -1077,7 +1080,7 @@ static void channel_tx_callback(nrfx_i2s_buffers_t const *p_released,
 			NRFX_I2S_REPORT_ERROR(GET_DATA);
 			return;
 		}
-		while (ch_tx->get_data(ch_tx, &mem_block, &mem_block_size) == 0) {
+		while (ch_tx->get_data(&mem_block, &mem_block_size) == 0) {
 			k_mem_slab_free(ch_tx->mem_slab, (void**)&mem_block);
 		}
 		for (unsigned int sem_cnt = ch_tx->sem.count;
@@ -1092,7 +1095,7 @@ static void channel_tx_callback(nrfx_i2s_buffers_t const *p_released,
 	else if (i2s->get_state() == I2S_IF_RESTARTING) {
 		return;
 	}
-	ret = ch_tx->get_data(ch_tx, &mem_block, &mem_block_size);
+	ret = ch_tx->get_data(&mem_block, &mem_block_size);
 	if (ret != 0) {
 		LOG_ERR("\r\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!![%s] Queue fetching error\r\n", __func__);
 		ch_tx->stop();
@@ -1122,13 +1125,15 @@ static void channel_rx_callback(nrfx_i2s_buffers_t const *p_released,
 	struct channel_str *ch_rx = i2s->channel_rx;
 	int ret;
 	if (p_released->p_rx_buffer != NULL) {
-		ret = queue_add(&ch_rx->mem_block_queue,
-				(void *)p_released->p_rx_buffer, i2s->size);
+		ret = ch_rx->get_data((u32_t **)&p_released->p_rx_buffer, &i2s->size);
+		/*ret = queue_add(&ch_rx->mem_block_queue,
+				(void *)p_released->p_rx_buffer, i2s->size);*/
 		if (ret < 0) {
 			return;
 		}
-		k_sem_give(&ch_rx->sem);
+		/*k_sem_give(&ch_rx->sem);
 		LOG_INF1("[%s]GIVE (%u / %u) -> ", __func__, i2s->channel_rx->sem.count, i2s->channel_rx->sem.limit);
+		*/
 	}
 	if (status == 0) {
 		LOG_INF1("[%s] STATUS IS ZERO -> ", __func__);
@@ -1155,7 +1160,6 @@ static void channel_rx_callback(nrfx_i2s_buffers_t const *p_released,
 	else if (i2s->get_state() == I2S_IF_RESTARTING) {
 		return;
 	}
-	//k_sem_reset(&direction_rx->sem); - gdzies to musi byc przy stopie
 	ret = k_mem_slab_alloc(ch_rx->mem_slab,
 			       (void **)&p_new_buffers->p_rx_buffer, K_NO_WAIT);
 	if (ret != 0) {
@@ -1167,10 +1171,14 @@ static void channel_rx_callback(nrfx_i2s_buffers_t const *p_released,
 }
 
 
-static int channel_rx_get_data(struct channel_str *direction_rx, u32_t **buf,
-		size_t *block_size)
+static int channel_rx_get_data(u32_t **buf, size_t *block_size)
 {
-
+	struct channel_str *ch_rx = get_interface()->channel_rx;
+	int ret = queue_add(&ch_rx->mem_block_queue, *buf, (u32_t)block_size);
+	if (ret < 0) {
+		return ret;
+	}
+	k_sem_give(&ch_rx->sem);
 	return 0;
 }
 
@@ -1281,8 +1289,7 @@ struct i2s_nrfx_data zephyr_i2s_data_0 =
 	},
 };
 
-static struct i2s_nrfx_interface interface =
-{
+static struct i2s_nrfx_interface interface = {
 	.state = I2S_IF_NOT_READY,
 	.size = 0,
 	.buffers = NULL,

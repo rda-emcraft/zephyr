@@ -14,5 +14,3 @@ properties:
     interrupts:
       required: true
 
-
-
