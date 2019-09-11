@@ -17,6 +17,7 @@
 #include <kernel_includes.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <toolchain.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -1337,6 +1338,16 @@ const char *k_thread_name_get(k_tid_t thread_id);
  */
 __syscall int k_thread_name_copy(k_tid_t thread_id, char *buf,
 				 size_t size);
+
+/**
+ * @brief Get thread state string
+ *
+ * Get the human friendly thread state string
+ *
+ * @param thread_id Thread ID
+ * @retval Thread state string, empty if no state flag is set
+ */
+const char *k_thread_state_str(k_tid_t thread_id);
 
 /**
  * @}
