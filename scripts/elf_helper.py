@@ -16,8 +16,7 @@ from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection
 
 if LooseVersion(elftools.__version__) < LooseVersion('0.24'):
-    sys.stderr.write("pyelftools is out of date, need version 0.24 or later\n")
-    sys.exit(1)
+    sys.exit("pyelftools is out of date, need version 0.24 or later")
 
 
 def subsystem_to_enum(subsys):
@@ -91,7 +90,8 @@ class KobjectType:
     def __repr__(self):
         return "<kobject %s>" % self.name
 
-    def has_kobject(self):
+    @staticmethod
+    def has_kobject():
         return True
 
     def get_kobjects(self, addr):
@@ -355,7 +355,7 @@ def addr_deref(elf, addr):
         start = section['sh_addr']
         end = start + section['sh_size']
 
-        if addr >= start and addr < end:
+        if start <= addr < end:
             data = section.data()
             offset = addr - start
             return struct.unpack("<I" if elf.little_endian else ">I",
@@ -396,8 +396,7 @@ class ElfHelper:
 
     def find_kobjects(self, syms):
         if not self.elf.has_dwarf_info():
-            sys.stderr.write("ELF file has no DWARF information\n")
-            sys.exit(1)
+            sys.exit("ELF file has no DWARF information")
 
         app_smem_start = syms["_app_smem_start"]
         app_smem_end = syms["_app_smem_end"]
@@ -514,9 +513,7 @@ class ElfHelper:
                 continue
 
             _, user_ram_allowed = kobjects[ko.type_obj.name]
-            if (not user_ram_allowed and
-                    (addr >= app_smem_start and addr < app_smem_end)):
-
+            if not user_ram_allowed and app_smem_start <= addr < app_smem_end:
                 self.debug_die(die,
                                "object '%s' found in invalid location %s"
                                % (name, hex(addr)))
@@ -568,9 +565,9 @@ class ElfHelper:
             return
         sys.stdout.write(scr + ": " + text + "\n")
 
-    def error(self, text):
-        sys.stderr.write("%s ERROR: %s\n" % (scr, text))
-        sys.exit(1)
+    @staticmethod
+    def error(text):
+        sys.exit("%s ERROR: %s" % (scr, text))
 
     def debug_die(self, die, text):
         fn, ln = get_filename_lineno(die)
@@ -579,11 +576,14 @@ class ElfHelper:
         self.debug("File '%s', line %d:" % (fn, ln))
         self.debug("    %s" % text)
 
-    def get_thread_counter(self):
+    @staticmethod
+    def get_thread_counter():
         return thread_counter
 
-    def get_sys_mutex_counter(self):
+    @staticmethod
+    def get_sys_mutex_counter():
         return sys_mutex_counter
 
-    def get_futex_counter(self):
+    @staticmethod
+    def get_futex_counter():
         return futex_counter

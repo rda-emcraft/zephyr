@@ -385,6 +385,10 @@ int zsock_accept_ctx(struct net_context *parent, struct sockaddr *addr,
 		return -1;
 	}
 
+	if (net_context_get_ip_proto(parent) == IPPROTO_TCP) {
+		net_context_set_state(parent, NET_CONTEXT_LISTENING);
+	}
+
 	struct net_context *ctx = k_fifo_get(&parent->accept_q, K_FOREVER);
 
 #ifdef CONFIG_USERSPACE
@@ -823,6 +827,10 @@ ssize_t zsock_recvfrom_ctx(struct net_context *ctx, void *buf, size_t max_len,
 			   struct sockaddr *src_addr, socklen_t *addrlen)
 {
 	enum net_sock_type sock_type = net_context_get_type(ctx);
+
+	if (max_len == 0) {
+		return 0;
+	}
 
 	if (sock_type == SOCK_DGRAM) {
 		return zsock_recv_dgram(ctx, buf, max_len, flags, src_addr, addrlen);
