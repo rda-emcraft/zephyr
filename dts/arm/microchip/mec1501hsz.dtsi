@@ -169,6 +169,53 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 		};
+		timer0: timer@40000c00 {
+			compatible = "microchip,xec-timer";
+			clock-frequency = <48000000>;
+			reg = <0x40000C00 0x20>;
+			interrupts = <136 0>;
+			label = "TIMER_0";
+			max-value = <0xFFFF>;
+			prescaler = <0>;
+			status = "disabled";
+		};
+		timer1: timer@40000c20 {
+			compatible = "microchip,xec-timer";
+			clock-frequency = <48000000>;
+			reg = <0x40000C20 0x20>;
+			interrupts = <137 0>;
+			label = "TIMER_1";
+			max-value = <0xFFFF>;
+			prescaler = <0>;
+			status = "disabled";
+		};
+		timer3: timer@40000ca0 {
+			compatible = "microchip,xec-timer";
+			clock-frequency = <48000000>;
+			reg = <0x40000CA0 0x20>;
+			interrupts = <141 0>;
+			label = "TIMER_3";
+			max-value = <0xFFFFFFFF>;
+			prescaler = <0>;
+		};
+		ps2_0: ps2@40009000 {
+			compatible = "microchip,xec-ps2";
+			reg = <0x40009000 0x40>;
+			interrupts = <100 1>;
+			label = "PS2_0";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+		ps2_1: ps2@40009040 {
+			compatible = "microchip,xec-ps2";
+			reg = <0x40009040 0x40>;
+			interrupts = <101 1>;
+			label = "PS2_1";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
 	};
 };
 
