@@ -1,14 +1,11 @@
-# Copyright (c) 2019 Nordic Semiconductor ASA
-# SPDX-License-Identifier: Apache-2.0
-
 title: Nordic I2S
 
 description: >
-    Binding for the Nordic I2S (Inter-IC sound interface)
+    This binding gives a base representation of the Nordic I2S
 
 compatible: "nordic,nrf-i2s"
 
-include: i2s-controller.yaml
+include:  i2s-controller.yaml
 
 properties:
     reg:
@@ -41,3 +38,4 @@ properties:
       type: int
       required: false
       description: MCK pin
+
