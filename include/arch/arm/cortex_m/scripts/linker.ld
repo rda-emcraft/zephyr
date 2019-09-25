@@ -69,6 +69,9 @@
 	#define RAM_ADDR CONFIG_SRAM_BASE_ADDRESS
 #endif
 
+#if defined(CONFIG_CUSTOM_SECTION_ALIGN)
+_region_min_align = CONFIG_CUSTOM_SECTION_MIN_ALIGN_SIZE;
+#else
 /* Set alignment to CONFIG_ARM_MPU_REGION_MIN_ALIGN_AND_SIZE
  * to make linker section alignment comply with MPU granularity.
  */
@@ -78,8 +81,9 @@ _region_min_align = CONFIG_ARM_MPU_REGION_MIN_ALIGN_AND_SIZE;
 /* If building without MPU support, use default 4-byte alignment. */
 _region_min_align = 4;
 #endif
+#endif
 
-#if defined(CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT)
+#if !defined(CONFIG_CUSTOM_SECTION_ALIGN) && defined(CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT)
 #define MPU_ALIGN(region_size) \
     . = ALIGN(_region_min_align); \
     . = ALIGN( 1 << LOG2CEIL(region_size))
@@ -273,6 +277,8 @@ SECTIONS
 	. = ALIGN(4);
 	} GROUP_LINK_IN(ROMABLE_REGION)
 
+#include <linker/cplusplus-rom.ld>
+
 	_image_rodata_end = .;
 	MPU_ALIGN(_image_rodata_end -_image_rom_start);
 	_image_rom_end = .;
@@ -411,6 +417,7 @@ SECTIONS
 #include <linker/kobject.ld>
 
 #include <linker/priv_stacks-noinit.ld>
+#include <linker/cplusplus-ram.ld>
 
     __data_ram_end = .;
 

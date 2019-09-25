@@ -15,9 +15,9 @@ information related to the device, derived from both the device tree and from
 the binding for the device.
 
 Bindings are files that describe device tree nodes. Device tree nodes are
-usually mapped to bindings via their 'compatible = "..."' property, but binding
-data can also come from a 'sub-node:' key in the binding for the parent device
-tree node.
+usually mapped to bindings via their 'compatible = "..."' property, but a
+binding can also come from a 'child-binding:' key in the binding for the parent
+device tree node.
 
 The top-level entry point of the library is the EDT class. EDT.__init__() takes
 a .dts file to parse and the path of a directory containing bindings.
@@ -187,13 +187,22 @@ class EDT:
             # compatibles. Might get false positives above due to comments and
             # stuff.
 
-            # Parsed PyYAML output (Python lists/dictionaries/strings/etc.,
-            # representing the file)
-            binding = yaml.load(contents, Loader=yaml.Loader)
+            try:
+                # Parsed PyYAML output (Python lists/dictionaries/strings/etc.,
+                # representing the file)
+                binding = yaml.load(contents, Loader=yaml.Loader)
+            except yaml.YAMLError as e:
+                _warn("'{}' appears in binding directories but isn't valid "
+                      "YAML: {}".format(binding_path, e))
+                continue
 
             binding_compat = _binding_compat(binding, binding_path)
-            if binding_compat is None:
-                # Not a binding. Might be a fragment or spurious file.
+            if binding_compat not in dt_compats:
+                # Either not a binding (binding_compat is None -- might be a
+                # binding fragment or a spurious file), or a binding whose
+                # compatible does not appear in the devicetree (picked up via
+                # some unrelated text in the binding file that happened to
+                # match a compatible)
                 continue
 
             # It's a match. Merge in the included bindings, do sanity checks,
@@ -333,8 +342,9 @@ class EDT:
 
 class Device:
     """
-    Represents a device. There's a one-to-one correspondence between device
-    tree nodes and Devices.
+    Represents a device, which is a devicetree node augmented with information
+    from bindings and some interpretation of devicetree properties. There's a
+    one-to-one correspondence between device tree nodes and Devices.
 
     These attributes are available on Device objects:
 
@@ -357,7 +367,12 @@ class Device:
       if the node has no 'label'
 
     parent:
-      The parent Device, or None if there is no parent
+      The Device instance for the devicetree parent of the Device, or None if
+      there is no parent
+
+    children:
+      A dictionary with the Device instances for the devicetree children of the
+      Device, indexed by name
 
     enabled:
       True unless the device's node has 'status = "disabled"'
@@ -480,6 +495,15 @@ class Device:
         return self.edt._node2dev.get(self._node.parent)
 
     @property
+    def children(self):
+        "See the class docstring"
+        # Could be initialized statically too to preserve identity, but not
+        # sure if needed. Parent Devices being initialized before their
+        # children would need to be kept in mind.
+        return {name: self.edt._node2dev[node]
+                for name, node in self._node.nodes.items()}
+
+    @property
     def enabled(self):
         "See the class docstring"
         return "status" not in self._node.props or \
@@ -556,28 +580,46 @@ class Device:
 
                     return
         else:
-            # No 'compatible' property. See if the parent has a 'sub-node:' key
-            # that gives the binding.
+            # No 'compatible' property. See if the parent binding has a
+            # 'child-binding:' key that gives the binding (or a legacy
+            # 'sub-node:' key).
 
             self.compats = []
 
-            if self.parent and self.parent._binding and \
-                "sub-node" in self.parent._binding:
-
-                # Binding found
-                self._binding = self.parent._binding["sub-node"]
+            binding_from_parent = self._binding_from_parent()
+            if binding_from_parent:
+                self._binding = binding_from_parent
                 self.binding_path = self.parent.binding_path
-
-                self.description = self.parent._binding.get("description")
-                if self.description:
-                    self.description = self.description.rstrip()
-
                 self.matching_compat = self.parent.matching_compat
+                self.description = self._binding["description"]
+
                 return
 
         # No binding found
-        self.matching_compat = self._binding = self.binding_path = \
+        self._binding = self.binding_path = self.matching_compat = \
             self.description = None
+
+    def _binding_from_parent(self):
+        # Returns the binding from 'child-binding:' in the parent node's
+        # binding (or from the legacy 'sub-node:' key), or None if missing
+
+        if not self.parent:
+            return None
+
+        pbinding = self.parent._binding
+        if not pbinding:
+            return None
+
+        if "child-binding" in pbinding:
+            return pbinding["child-binding"]
+
+        # Backwards compatibility
+        if "sub-node" in pbinding:
+            return {"title": pbinding["title"],
+                    "description": pbinding["description"],
+                    "properties": pbinding["sub-node"]["properties"]}
+
+        return None
 
     def _bus_from_parent_binding(self):
         # _init_binding() helper. Returns the bus specified by 'child-bus: ...'
@@ -1439,7 +1481,8 @@ def _check_binding(binding, binding_path):
                  .format(prop, binding_path))
 
     ok_top = {"title", "description", "compatible", "properties", "#cells",
-              "parent-bus", "child-bus", "parent", "child", "sub-node"}
+              "parent-bus", "child-bus", "parent", "child", "child-binding",
+              "sub-node"}
 
     for prop in binding:
         if prop not in ok_top:
@@ -1471,7 +1514,19 @@ def _check_binding(binding, binding_path):
 
     _check_binding_properties(binding, binding_path)
 
+    if "child-binding" in binding:
+        if not isinstance(binding["child-binding"], dict):
+            _err("malformed 'child-binding:' in {}, expected a binding "
+                 "(dictionary with keys/values)".format(binding_path))
+
+        _check_binding(binding["child-binding"], binding_path)
+
     if "sub-node" in binding:
+        _warn("'sub-node: properties: ...' in {} is deprecated and will be "
+              "removed - please give a full binding for the child node in "
+              "'child-binding:' instead (see binding-template.yaml)"
+              .format(binding_path))
+
         if binding["sub-node"].keys() != {"properties"}:
             _err("expected (just) 'properties:' in 'sub-node:' in {}"
                  .format(binding_path))

@@ -31,7 +31,15 @@ __start:
 1:
 #endif
 
+	/* FIXME: ...resetting TSC here is common to IA32 and Intel64... */
 	/* FIXME: ...disabling the PICs is common to IA32 and Intel64... */
+
+#ifdef CONFIG_BOOT_TIME_MEASUREMENT
+	xorl %eax, %eax
+	xorl %edx, %edx
+	movl $X86_TIME_STAMP_COUNTER_MSR, %ecx
+	wrmsr
+#endif
 
 #ifdef CONFIG_PIC_DISABLE
 	movb $0xff, %al
@@ -51,7 +59,7 @@ __start:
 	movw %ax, %fs
 	movw %ax, %gs
 
-	movl $(exception_stack + CONFIG_EXCEPTION_STACK_SIZE), %esp
+	movl $(_exception_stack + CONFIG_EXCEPTION_STACK_SIZE), %esp
 
 	/* transition to long mode. along the way, we enable SSE. */
 
@@ -81,10 +89,11 @@ __start:
 	movw %ax, %es
 	movw %ax, %ss
 	movw %ax, %fs
-	movw %ax, %gs
 
 	movl $X86_KERNEL_TSS, %eax
 	ltr %ax
+	movl $X86_KERNEL_GS_64, %eax
+	movw %ax, %gs
 
 	cld
 	xorl %eax, %eax
@@ -94,8 +103,8 @@ __start:
 
 #ifdef CONFIG_INIT_STACKS
 	movq $0xAAAAAAAAAAAAAAAA, %rax
-	movq $ist, %rdi
-	movq $((CONFIG_ISR_DEPTH*CONFIG_ISR_STACK_SIZE)>>3), %rcx
+	movq $_interrupt_stack, %rdi
+	movq $(CONFIG_ISR_STACK_SIZE >> 3), %rcx
 	rep stosq
 #endif
 
@@ -165,25 +174,24 @@ mxcsr:	.long X86_MXCSR_SANE
 #endif
 
 /*
- * XXX: describe __swap, __resume, stacks
+ * void z_arch_switch(void *switch_to, void **switched_from);
+ *
+ * Note that switch_handle for us is simply a pointer to the containing
+ * 'struct k_thread', thus:
+ *
+ * RDI = (struct k_thread *) switch_to
+ * RSI = (struct k_thread **) switched_from
  */
 
-.globl _k_neg_eagain	/* from errno.c: int _k_neg_eagain = -EAGAIN; */
+.globl z_arch_switch
+z_arch_switch:
+	movq (%rsi), %rsi
 
-.globl __swap
-__swap:
-	movq $_kernel, %rsi
-	movq _kernel_offset_to_current(%rsi), %rsi
+	andb $~X86_THREAD_FLAG_ALL, _thread_offset_to_flags(%rsi)
 
-	orb $_THREAD_SWAPPED, _thread_offset_to_thread_state(%rsi)
-
-	movl _k_neg_eagain, %eax
-	movl %eax, _thread_offset_to_rax(%rsi)
 	popq %rax
 	movq %rax, _thread_offset_to_rip(%rsi)
 	movq %rsp, _thread_offset_to_rsp(%rsi)
-	movl %edi, %edi /* N.B.: zero extend */
-	movq %rdi, _thread_offset_to_rflags(%rsi)
 	movq %rbx, _thread_offset_to_rbx(%rsi)
 	movq %rbp, _thread_offset_to_rbp(%rsi)
 	movq %r12, _thread_offset_to_r12(%rsi)
@@ -191,46 +199,43 @@ __swap:
 	movq %r14, _thread_offset_to_r14(%rsi)
 	movq %r15, _thread_offset_to_r15(%rsi)
 
-	movq $(ist + CONFIG_ISR_STACK_SIZE), %rsp
+	movq $(_interrupt_stack + CONFIG_ISR_STACK_SIZE), %rsp
 
 	/* fall through to __resume */
 
 /*
  * Entry:
- *   RSP = top of ist
+ *   RSP = top of _interrupt_stack
+ *   RDI = (struct k_thread *) thread to resume
  */
 
 __resume:
-	movq $_kernel, %rdi
-	movq _kernel_offset_to_ready_q_cache(%rdi), %rsi
-	movq %rsi, _kernel_offset_to_current(%rdi)
-
 	pushq $X86_KERNEL_DS_64			/* SS */
-	pushq _thread_offset_to_rsp(%rsi)	/* RSP */
-	pushq _thread_offset_to_rflags(%rsi)	/* RFLAGS */
+	pushq _thread_offset_to_rsp(%rdi)	/* RSP */
+	pushq _thread_offset_to_rflags(%rdi)	/* RFLAGS */
 	pushq $X86_KERNEL_CS_64			/* CS */
-	pushq _thread_offset_to_rip(%rsi)	/* RIP */
+	pushq _thread_offset_to_rip(%rdi)	/* RIP */
 
-	movq _thread_offset_to_rbx(%rsi), %rbx
-	movq _thread_offset_to_rbp(%rsi), %rbp
-	movq _thread_offset_to_r12(%rsi), %r12
-	movq _thread_offset_to_r13(%rsi), %r13
-	movq _thread_offset_to_r14(%rsi), %r14
-	movq _thread_offset_to_r15(%rsi), %r15
-	movq _thread_offset_to_rax(%rsi), %rax
+	movq _thread_offset_to_rbx(%rdi), %rbx
+	movq _thread_offset_to_rbp(%rdi), %rbp
+	movq _thread_offset_to_r12(%rdi), %r12
+	movq _thread_offset_to_r13(%rdi), %r13
+	movq _thread_offset_to_r14(%rdi), %r14
+	movq _thread_offset_to_r15(%rdi), %r15
 
-	testb $_THREAD_SWAPPED, _thread_offset_to_thread_state(%rsi)
-	jnz 1f
+	testb $X86_THREAD_FLAG_ALL, _thread_offset_to_flags(%rdi)
+	jz 1f
 
-	fxrstor _thread_offset_to_sse(%rsi)
-	movq _thread_offset_to_rcx(%rsi), %rcx
-	movq _thread_offset_to_rdx(%rsi), %rdx
-	movq _thread_offset_to_rdi(%rsi), %rdi
-	movq _thread_offset_to_r8(%rsi), %r8
-	movq _thread_offset_to_r9(%rsi), %r9
-	movq _thread_offset_to_r10(%rsi), %r10
-	movq _thread_offset_to_r11(%rsi), %r11
-	movq _thread_offset_to_rsi(%rsi), %rsi  /* do last :-) */
+	fxrstor _thread_offset_to_sse(%rdi)
+	movq _thread_offset_to_rax(%rdi), %rax
+	movq _thread_offset_to_rcx(%rdi), %rcx
+	movq _thread_offset_to_rdx(%rdi), %rdx
+	movq _thread_offset_to_rsi(%rdi), %rsi
+	movq _thread_offset_to_r8(%rdi), %r8
+	movq _thread_offset_to_r9(%rdi), %r9
+	movq _thread_offset_to_r10(%rdi), %r10
+	movq _thread_offset_to_r11(%rdi), %r11
+	movq _thread_offset_to_rdi(%rdi), %rdi  /* do last :-) */
 
 1:	iretq
 
@@ -248,11 +253,20 @@ gdt:
 	.word 0, 0, 0x9800, 0x0020	/* 0x18: 64-bit kernel code */
 	.word 0, 0, 0x9200, 0x0000	/* 0x20: 64-bit kernel data */
 
-	.word 0x67			/* 0x28: 64-bit TSS */
-	.word tss
+	.word 0, 0, 0, 0		/* 0x28: unused */
+
+	.word 0				/* 0x30: 64-bit TSS data (for GS) */
+	.word tss0
+	.word 0x9200
+	.word 0
+
+	.word 0, 0, 0, 0		/* 0x38: unused */
+
+	.word __X86_TSS64_SIZEOF-1	/* 0x40: 64-bit TSS (16-byte entry) */
+	.word tss0
 	.word 0x8900
 	.word 0
-	.word 0				/* 0x30: TSS consumes two entries */
+	.word 0
 	.word 0
 	.word 0
 	.word 0
@@ -260,27 +274,6 @@ gdt:
 gdt48:
 	.word (gdt48 - gdt - 1)
 	.long gdt
-
-/*
- * TSS - no privilege transitions (yet) so only used for
- * interrupt (IST1) and exception stack (IST7) locations.
- */
-
-.align 8
-tss:	.long 0
-rsp0:	.long 0, 0
-	.long 0, 0
-	.long 0, 0
-	.long 0, 0
-ist1:	.long (ist + CONFIG_ISR_STACK_SIZE), 0
-	.long 0, 0
-	.long 0, 0
-	.long 0, 0
-	.long 0, 0
-	.long 0, 0
-ist7:	.long (exception_stack + CONFIG_EXCEPTION_STACK_SIZE), 0
-	.long 0, 0
-	.long 0
 
 /*
  * IDT.
@@ -422,7 +415,7 @@ EXCEPT      (28); EXCEPT      (29); EXCEPT      (30); EXCEPT      (31)
 
 irq:
 	pushq %rsi
-	movq $_kernel, %rsi
+	movq %gs:__x86_tss64_t_cpu_OFFSET, %rsi
 
 	/*
 	 * Bump the IRQ nesting count and move to the next IRQ stack.
@@ -430,12 +423,12 @@ irq:
 	 * haven't reached the maximum nesting depth yet, do it.
 	 */
 
-	incl _kernel_offset_to_nested(%rsi)
-	addq $CONFIG_ISR_STACK_SIZE, ist1
-	cmpl $CONFIG_ISR_DEPTH, _kernel_offset_to_nested(%rsi)
+	incl ___cpu_t_nested_OFFSET(%rsi)
+	subq $CONFIG_ISR_SUBSTACK_SIZE, %gs:__x86_tss64_t_ist1_OFFSET
+	cmpl $CONFIG_ISR_DEPTH, ___cpu_t_nested_OFFSET(%rsi)
 	jz 1f
 	sti
-1:	cmpl $1, _kernel_offset_to_nested(%rsi)
+1:	cmpl $1, ___cpu_t_nested_OFFSET(%rsi)
 	je irq_enter_unnested
 
 	/*
@@ -465,8 +458,8 @@ irq_enter_nested: /* Nested IRQ: dump register state to stack. */
 	jmp irq_dispatch
 
 irq_enter_unnested: /* Not nested: dump state to thread struct for __resume */
-	movq _kernel_offset_to_current(%rsi), %rsi
-	andb $(~_THREAD_SWAPPED), _thread_offset_to_thread_state(%rsi)
+	movq ___cpu_t_current_OFFSET(%rsi), %rsi
+	orb $X86_THREAD_FLAG_ALL, _thread_offset_to_flags(%rsi)
 	fxsave _thread_offset_to_sse(%rsi)
 	movq %rbx, _thread_offset_to_rbx(%rsi)
 	movq %rbp, _thread_offset_to_rbp(%rsi)
@@ -499,22 +492,27 @@ irq_dispatch:
 	movq x86_irq_args(,%rcx,8), %rdi
 	call *%rbx
 
-#ifdef CONFIG_X2APIC
-	call z_x2apic_eoi
-#else
 	xorl %eax, %eax
+#ifdef CONFIG_X2APIC
+	xorl %edx, %edx
+	movl $(X86_X2APIC_BASE_MSR + (LOAPIC_EOI >> 4)), %ecx
+	wrmsr
+#else /* xAPIC */
 	movl %eax, (CONFIG_LOAPIC_BASE_ADDRESS + LOAPIC_EOI)
 #endif
 
-	movq $_kernel, %rsi
+	movq %gs:__x86_tss64_t_cpu_OFFSET, %rsi
 	cli
-	subq $CONFIG_ISR_STACK_SIZE, ist1
-	decl _kernel_offset_to_nested(%rsi)
-	/* not nested, exit via __resume (might change threads) */
-#ifdef CONFIG_STACK_SENTINEL
-	call z_check_stack_sentinel
-#endif
-	jz __resume
+	addq $CONFIG_ISR_SUBSTACK_SIZE, %gs:__x86_tss64_t_ist1_OFFSET
+	decl ___cpu_t_nested_OFFSET(%rsi)
+	jnz irq_exit_nested
+
+	/* not nested; ask the scheduler who's up next and resume it */
+
+	movq ___cpu_t_current_OFFSET(%rsi), %rdi
+	call z_get_next_switch_handle
+	movq %rax, %rdi
+	jmp __resume
 
 irq_exit_nested:
 	fxrstor (%rsp)
@@ -587,7 +585,8 @@ pdp:	.long 0x00000183		/* 0x183 = G, 1GB, R/W, P */
  * The exception stack is used both for exceptions and early initialization.
  */
 
+.global _exception_stack
 .align 16
-exception_stack:
+_exception_stack:
 	.fill CONFIG_EXCEPTION_STACK_SIZE, 1, 0xAA
 
