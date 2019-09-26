@@ -1039,7 +1039,7 @@ static void channel_tx_callback(nrfx_i2s_buffers_t const *p_released,
 	struct channel_str *ch_tx = get_interface()->channel_tx;
 	size_t mem_block_size;
 	u32_t *mem_block = NULL;
-	int get_data_ret = 0;
+	int get_data_ret = 1;
 
 	if (ch_tx->current_state == I2S_STATE_RUNNING &&
 	    i2s->get_state() == I2S_IF_NEEDS_RESTART) {
@@ -1100,7 +1100,7 @@ static void channel_tx_callback(nrfx_i2s_buffers_t const *p_released,
 		}
 	} else if (ch_tx->current_state == I2S_STATE_ERROR) {
 		return;
-	} else if (get_data_ret != 0) {
+	} else if (get_data_ret < 0) {
 		LOG_ERROR;
 		interface_error_service();
 		channel_error_service(ch_tx);
