@@ -28,7 +28,7 @@
 #define FRAME_CLOCK_FREQUENCY_HZ	10000
 #define WORD_SIZE_BITS			(SINGLE_SAMPLE_SIZE_BYTES * 8)
 #define TRANSFER_BLOCK_TIME_US		\
-	((NB_OF_SAMPLES * 1000) / FRAME_CLOCK_FREQUENCY_HZ)
+	((NB_OF_SAMPLES * 1000000) / FRAME_CLOCK_FREQUENCY_HZ)
 #define TRANSFER_TIMEOUT_MS		\
 	((TRANSFER_BLOCK_TIME_US > 1000) ? \
 	(1 + TRANSFER_BLOCK_TIME_US / 1000) : (1))
@@ -114,6 +114,8 @@ void main(void)
 		return;
 	}
 	printk("[I2S]TX:ENABLED\n");
+	printk("[I2S]TX Timeout:%u[ms]\n", i2sConfigTx.timeout);
+	printk("[I2S]TX Word size:%u[bits]\n", i2sConfigTx.word_size);
 #else
 	printk("[I2S]TX:DISABLED\n");
 #endif
@@ -134,6 +136,8 @@ void main(void)
 		return;
 	}
 	printk("[I2S]RX:ENABLED\n");
+	printk("[I2S]RX Timeout:%u[ms]\n", i2sConfigRx.timeout);
+	printk("[I2S]RX Word size:%u[bits]\n", i2sConfigRx.word_size);
 #else
 	printk("[I2S]RX:DISABLED\n");
 #endif
