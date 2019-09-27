@@ -209,6 +209,18 @@ arduino_spi: &spi3 {
 	mosi-pin = <45>;
 };
 
+<<<<<<< HEAD
+=======
+&i2s0 {
+	status = "okay";
+	mck-pin = <27>;
+	sck-pin = <31>;
+	lrck-pin = <28>;
+	sdout-pin = <30>;
+	sdin-pin = <29>;
+};
+
+>>>>>>> b5f54d3609... qdrivers: i2s: nrfx: Add shim for nrfx I2S master driver
 &flash0 {
 	/*
 	 * For more information, see:

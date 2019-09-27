@@ -270,6 +270,19 @@
 			label = "SPI_3";
 		};
 
+<<<<<<< HEAD
+=======
+		i2s0: i2s@40025000 {
+			compatible = "nordic,nrf-i2s";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x40025000 0x1000>;
+			interrupts = <37 1>;
+			status = "disabled";
+			label = "I2S_0";
+		};
+
+>>>>>>> b5f54d3609... qdrivers: i2s: nrfx: Add shim for nrfx I2S master driver
 		rtc0: rtc@4000b000 {
 			compatible = "nordic,nrf-rtc";
 			reg = <0x4000b000 0x1000>;
