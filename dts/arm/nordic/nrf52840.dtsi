@@ -271,15 +271,15 @@
 			label = "SPI_3";
 		};
 
-                i2s0: i2s@40025000 {
-                        compatible = "nordic,nrf-i2s";
-                        #address-cells = <1>;
-                        #size-cells = <0>;
-                        reg = <0x40025000 0x1000>;
-                        interrupts = <37 1>;
+		i2s0: i2s@40025000 {
+			compatible = "nordic,nrf-i2s";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x40025000 0x1000>;
+			interrupts = <37 1>;
 			status = "disabled";
-                        label = "I2S_0";
-                };
+			label = "I2S_0";
+		};
 
 		rtc0: rtc@4000b000 {
 			compatible = "nordic,nrf-rtc";
