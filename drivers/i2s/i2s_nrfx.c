@@ -241,7 +241,7 @@ static int interface_restart(void)
 	int ret;
 
 	return i2s->set_state(I2S_IF_NEEDS_RESTART);
-
+}
 
 static int interface_stop(void)
 {
