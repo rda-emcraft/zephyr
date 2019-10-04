@@ -97,7 +97,6 @@ void main(void)
 		printk("[I2S]Driver not found\n");
 		return;
 	}
-
 #ifdef USE_TX
 	/*TX transfer in progress*/
 	bool tx_running = false;
@@ -107,19 +106,7 @@ void main(void)
 	int write_res;
 	/*tx_buffer handler*/
 	void *my_tx_buf = NULL;
-
-	ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
-	if (ret != 0) {
-		printk("[I2S]TX:Configuration failed\n");
-		return;
-	}
-	printk("[I2S]TX:ENABLED\n");
-	printk("[I2S]TX Timeout:%u[ms]\n", i2sConfigTx.timeout);
-	printk("[I2S]TX Word size:%u[bits]\n", i2sConfigTx.word_size);
-#else
-	printk("[I2S]TX:DISABLED\n");
 #endif
-
 #ifdef USE_RX
 	/*RX transfer in progress*/
 	bool rx_running = false;
@@ -129,22 +116,41 @@ void main(void)
 	void *my_rx_buf = NULL;
 	/*data size received by i2s_read()*/
 	size_t rcv_size = 0;
+#endif
+	for (u32_t i = 0; ; ++i) {
+		if (i == 0) {
 
-	ret = i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx);
-	if (ret != 0) {
-		printk("[I2S]RX:Configuration failed\n");
-		return;
-	}
-	printk("[I2S]RX:ENABLED\n");
-	printk("[I2S]RX Timeout:%u[ms]\n", i2sConfigRx.timeout);
-	printk("[I2S]RX Word size:%u[bits]\n", i2sConfigRx.word_size);
+
+#ifdef USE_TX
+			i2sConfigTx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
+			ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
+			if (ret != 0) {
+				printk("[I2S]TX:Configuration failed\n");
+				return;
+			}
+			printk("[I2S]TX:ENABLED\n");
+			printk("[I2S]TX Timeout:%u[ms]\n", i2sConfigTx.timeout);
+			printk("[I2S]TX Word size:%u[bits]\n", i2sConfigTx.word_size);
 #else
-	printk("[I2S]RX:DISABLED\n");
+			printk("[I2S]TX:DISABLED\n");
 #endif
 
-	for (u32_t i = 0; ; ++i) {
+#ifdef USE_RX
+			i2sConfigRx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
+			ret = i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx);
+			if (ret != 0) {
+				printk("[I2S]RX:Configuration failed\n");
+				return;
+			}
+			printk("[I2S]RX:ENABLED\n");
+			printk("[I2S]RX Timeout:%u[ms]\n", i2sConfigRx.timeout);
+			printk("[I2S]RX Word size:%u[bits]\n", i2sConfigRx.word_size);
+#else
+			printk("[I2S]RX:DISABLED\n");
+#endif
+		}
 #ifdef USE_TX
-		if (i == 5) {
+		if (i == 10) {
 			if (i2s_trigger(dev,
 					I2S_DIR_TX, I2S_TRIGGER_START) != 0) {
 				/*error occured -
@@ -185,7 +191,7 @@ void main(void)
 #endif /*USE_TX*/
 
 #ifdef USE_RX
-		if (i == 1) {
+		if (i == 10) {
 			if (i2s_trigger(dev,
 					I2S_DIR_RX, I2S_TRIGGER_START) != 0) {
 				/*error occured -
@@ -213,13 +219,13 @@ void main(void)
 				 * values while printing received data -
 				 * it may cause TX underrun errors
 				 */
-				printk("%u, %p: %X %X %X %X %X %X %X %X\n",
+				/*printk("%u, %p: %X %X %X %X %X %X %X %X\n",
 						 rcv_size, rcv_data,
 						 rcv_data[0], rcv_data[1],
 						 rcv_data[2], rcv_data[3],
 						 rcv_data[4], rcv_data[5],
 						 rcv_data[6], rcv_data[7]
-							       );
+							       );*/
 				/*after use free allocated buffer*/
 				k_mem_slab_free(i2sConfigRx.mem_slab,
 						 &my_rx_buf);
@@ -229,6 +235,40 @@ void main(void)
 				 * refer to I2S API zephyr description
 				 */
 			}
+		}
+		if (i == 100) {
+			i2sConfigTx.frame_clk_freq = 0;
+			i2sConfigRx.frame_clk_freq = 0;
+						while((i2s_read(dev, &my_rx_buf, &rcv_size) == 0)) {
+				k_mem_slab_free(i2sConfigRx.mem_slab, &my_rx_buf);
+			}
+			while (i2s_trigger(dev,
+					I2S_DIR_TX, I2S_TRIGGER_DRAIN) != 0) {
+
+
+			}
+			while (i2s_trigger(dev,
+					I2S_DIR_RX, I2S_TRIGGER_DRAIN) != 0) {
+
+				if (i2s_read(dev, &my_rx_buf, &rcv_size) == 0) {
+					k_mem_slab_free(i2sConfigRx.mem_slab,
+							 &my_rx_buf);
+				}
+			}
+			while (i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx) == -EIO) {
+
+			}
+			while  (i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx) == -EIO) {
+				if (i2s_read(dev, &my_rx_buf, &rcv_size) == 0) {
+					k_mem_slab_free(i2sConfigRx.mem_slab,
+							 &my_rx_buf);
+				}
+			}
+
+			printk("\r\nstopped\r\n");
+			k_sleep(5000);
+			printk("zzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
+			i = 0xFFFFFFFF;
 		}
 #endif
 	}

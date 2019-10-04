@@ -30,7 +30,7 @@ struct i2s_clk_settings_t {
 					  * values
 					  *(accordingly 8, 16 and 24 bit).
 					  */
-} i2s_clk_settings_t;
+};
 
 /**@brief I2S driver clock configfuration table. */
 
