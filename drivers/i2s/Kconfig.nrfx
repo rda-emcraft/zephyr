@@ -7,8 +7,8 @@
 
 menuconfig NRFX_I2S
 	bool "NRFX I2S controller driver"
-	depends on I2S && HAS_HW_NRF_I2S
-	default n
+	depends on HAS_HW_NRF_I2S
+	default y
 	help
 	  Enable nrfx I2S support for Nordic CPUs
 
