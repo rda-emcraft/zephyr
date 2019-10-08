@@ -15,11 +15,9 @@
 #include "i2s_nrfx.h"
 #include <logging/log.h>
 
-#define LOG_LEVEL _LOG_LEVEL_DBG
 LOG_MODULE_REGISTER(i2s_nrfx, CONFIG_I2S_LOG_LEVEL);
 
 #define LOG_ERROR(msg) LOG_ERR("\r\n[%s:%u]: %s\r\n", __func__, __LINE__, msg)
-#define RING_BUF_INC(idx, limit) {idx = (++idx < limit) ? idx : 0; }
 
 #define DEV_CFG(dev) \
 	(const struct i2s_nrfx_config *const)((dev)->config->config_info)
@@ -109,8 +107,6 @@ static inline struct i2s_nrfx_interface *get_interface(
 static inline int channel_set_error_state(struct channel_str *channel,
 					   int err_code);
 
-static void channel_error_service(struct channel_str *channel);
-
 static int interface_set_state(struct i2s_nrfx_interface *i2s,
 				enum i2s_if_state new_state);
 
@@ -125,6 +121,11 @@ static inline bool next_buffers_needed(u32_t status)
  *  Queue management
  *
  */
+static inline void queue_idx_inc(u8_t *idx, u8_t limit)
+{
+	*idx = (++(*idx) < limit) ? (*idx) : 0;
+}
+
 static void queue_init(struct queue *queue, u8_t len,
 		       struct queue_item *queue_items)
 {
@@ -138,7 +139,7 @@ static int queue_add(struct queue *queue, void *data, u32_t size)
 {
 	u8_t wr_idx = queue->write_idx;
 
-	RING_BUF_INC(wr_idx, queue->len);
+	queue_idx_inc(&wr_idx, queue->len);
 	if (wr_idx == queue->read_idx) {
 		/* cannot overwrite unread data */
 		return -ENOMEM;
@@ -163,7 +164,7 @@ static int queue_fetch(struct queue *queue, void **data, u32_t *size)
 	*data = queue->queue_items[queue->read_idx].data;
 	*size = queue->queue_items[queue->read_idx].size;
 
-	RING_BUF_INC(queue->read_idx, queue->len);
+	queue_idx_inc(&queue->read_idx, queue->len);
 	return 0;
 }
 
@@ -281,8 +282,10 @@ static int interface_start(struct i2s_nrfx_interface *i2s)
 	if (ret != 0) {
 		return ret;
 	}
+
+	/*nrfx_i2s_start() procedure needs buffer size in 32-bit word units*/
 	nrfx_err_t status = nrfx_i2s_start(&i2s->buffers,
-					   i2s->size / 4, 0);
+					   i2s->size / sizeof(u32_t), 0);
 
 	if (status != NRFX_SUCCESS) {
 		interface_error_service(i2s, "Failed to start interface");
@@ -416,30 +419,20 @@ static int cfg_periph_config(struct device *dev,
 	const struct i2s_nrfx_config *const dev_const_cfg = DEV_CFG(dev);
 	struct i2s_nrfx_data *const dev_data = DEV_DATA(dev);
 	struct i2s_nrfx_interface *i2s = get_interface(dev);
-	nrfx_i2s_config_t drv_cfg;
+	nrfx_i2s_config_t drv_cfg = {
+		.sck_pin = dev_const_cfg->sck_pin,
+		.lrck_pin = dev_const_cfg->lrck_pin,
+		.mck_pin = dev_const_cfg->mck_pin,
+		.sdout_pin = dev_const_cfg->sdout_pin,
+		.sdin_pin = dev_const_cfg->sdin_pin,
+	};
 
-	if (i2s_cfg == NULL) {
-		interface_error_service(i2s,
-				"Config: Invalid device configuration");
-		return -EINVAL;
-	}
-
-	if (dev_data == NULL) {
-		interface_error_service(i2s, "Config: Invalid device data");
-		return -EINVAL;
-	}
-
+#warning zapytac Andrzeja o podwojne asercje
+	assert(i2s_cfg != NULL && dev != NULL && dev_data != NULL);
 	if (i2s_cfg->mem_slab == NULL) {
 		interface_error_service(i2s, "Config: Invalid memory slab");
 		return -EINVAL;
 	}
-	memset(&drv_cfg, 0, sizeof(nrfx_i2s_config_t));
-	drv_cfg.sck_pin = dev_const_cfg->sck_pin;
-	drv_cfg.lrck_pin = dev_const_cfg->lrck_pin;
-	drv_cfg.mck_pin = dev_const_cfg->mck_pin;
-	drv_cfg.sdout_pin = dev_const_cfg->sdout_pin;
-	drv_cfg.sdin_pin = dev_const_cfg->sdin_pin;
-
 	if (dev_data) {
 		switch (i2s_cfg->word_size) {
 		case 8:
@@ -524,6 +517,7 @@ static int i2s_nrfx_channel_get(enum i2s_dir dir,
 			    struct i2s_nrfx_data *const dev_data,
 			    struct channel_str **channel)
 {
+	assert(dev_data != NULL);
 	switch (dir) {
 	case I2S_DIR_RX:
 		*channel = &dev_data->interface.channel_rx;
@@ -558,15 +552,7 @@ static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 	int ret;
 	nrfx_err_t status;
 
-	if (dev == NULL) {
-		interface_error_service(i2s, "Config: Invalid device");
-		return -EINVAL;
-	}
-	if (i2s_cfg == NULL) {
-		interface_error_service(i2s,
-				"Config: Invalid I2S configuration structure");
-		return -EINVAL;
-	}
+	assert(i2s_cfg != NULL && dev != NULL && dev_data != NULL);
 	ret = i2s_nrfx_channel_get(dir, dev_data, &channel);
 	if (ret != 0) {
 		interface_error_service(i2s,
@@ -694,7 +680,7 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 	}
 
 	ret = i2s_nrfx_channel_get(dir, dev_data, &channel);
-	if ((ret != 0) || (channel == NULL)) {
+	if (ret != 0) {
 		return ret;
 	}
 
@@ -765,11 +751,6 @@ static inline int channel_set_error_state(struct channel_str *channel,
 	return err_code;
 }
 
-static void channel_error_service(struct channel_str *channel)
-{
-	channel_change_state(channel, I2S_STATE_ERROR);
-}
-
 static int channel_change_state(struct channel_str *channel,
 				 enum i2s_state new_state)
 {
@@ -818,42 +799,31 @@ static int channel_tx_start(struct i2s_nrfx_interface *i2s)
 	size_t mem_block_size;
 
 	ret = channel_change_state(ch_tx, I2S_STATE_RUNNING);
-
 	if (ret < 0) {
 		return ret;
 	}
 	key = irq_lock();
-	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
-		ret = ch_tx->mng->get_data(i2s,
-			(u32_t **)&i2s->buffers.p_tx_buffer, &mem_block_size);
-		if (ret < 0) {
-			LOG_ERROR("TX start: Failed to get data from queue");
-			return channel_set_error_state(ch_tx, ret);
-		}
-		ret = interface_restart(i2s);
-		irq_unlock(key);
-		if (ret != 0) {
-			LOG_ERROR("TX start: Failed to restart interface");
-			return channel_set_error_state(ch_tx, ret);
-		}
-	} else if (interface_get_state(i2s) == I2S_IF_READY) {
-		ret = ch_tx->mng->get_data(i2s,
-			(u32_t **)&i2s->buffers.p_tx_buffer, &mem_block_size);
-		if (ret < 0) {
-			irq_unlock(key);
-			LOG_ERROR("TX start: Failed to get data from queue");
-			return channel_set_error_state(ch_tx, ret);
-		}
-		ret = interface_start(i2s);
-		irq_unlock(key);
-		if (ret < 0) {
-			LOG_ERROR("TX start: Failed to start interface");
-			return channel_set_error_state(ch_tx, ret);
-		}
-	} else {
+	if (interface_get_state(i2s) != I2S_IF_RUNNING &&
+	    interface_get_state(i2s) != I2S_IF_READY) {
 		irq_unlock(key);
 		LOG_ERROR("TX start: Invalid interface state");
 		return channel_set_error_state(ch_tx, -EIO);
+	}
+	ret = ch_tx->mng->get_data(i2s,
+		(u32_t **)&i2s->buffers.p_tx_buffer, &mem_block_size);
+	if (ret < 0) {
+		LOG_ERROR("TX start: Failed to get data from queue");
+		return channel_set_error_state(ch_tx, ret);
+	}
+	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
+		ret = interface_restart(i2s);
+	} else if (interface_get_state(i2s) == I2S_IF_READY) {
+		ret = interface_start(i2s);
+	}
+	irq_unlock(key);
+	if (ret < 0) {
+		LOG_ERROR("TX start: Failed to start/restart interface");
+		return channel_set_error_state(ch_tx, ret);
 	}
 	return 0;
 }
@@ -865,44 +835,33 @@ static int channel_rx_start(struct i2s_nrfx_interface *i2s)
 	struct channel_str * const ch_rx = &i2s->channel_rx;
 
 	ret = channel_change_state(ch_rx, I2S_STATE_RUNNING);
-	if (ret != 0) {
-		return channel_set_error_state(ch_rx, ret);
+	if (ret < 0) {
+		return ret;
 	}
 	key = irq_lock();
-	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
-		ret = k_mem_slab_alloc(ch_rx->mem_slab,
-				       (void **)&i2s->buffers.p_rx_buffer,
-				       K_NO_WAIT);
-		if (ret != 0) {
-			irq_unlock(key);
-			LOG_ERROR("RX start: Failed allocate memory slab");
-			return channel_set_error_state(ch_rx, ret);
-		}
-		ret = interface_restart(i2s);
-		irq_unlock(key);
-		if (ret != 0) {
-			LOG_ERROR("RX start: Failed to restart interface");
-			return channel_set_error_state(ch_rx, ret);
-		}
-	} else if (interface_get_state(i2s) == I2S_IF_READY) {
-		ret = k_mem_slab_alloc(ch_rx->mem_slab,
-				       (void **)&i2s->buffers.p_rx_buffer,
-				       K_NO_WAIT);
-		if (ret != 0) {
-			irq_unlock(key);
-			LOG_ERROR("RX start: Failed allocate memory slab");
-			return channel_set_error_state(ch_rx, ret);
-		}
-		ret = interface_start(i2s);
-		irq_unlock(key);
-		if (ret != 0) {
-			LOG_ERROR("RX start: Failed to start interface");
-			return channel_set_error_state(ch_rx, ret);
-		}
-	} else {
+	if (interface_get_state(i2s) != I2S_IF_RUNNING &&
+	    interface_get_state(i2s) != I2S_IF_READY) {
 		irq_unlock(key);
 		LOG_ERROR("RX start: Invalid interface state");
 		return channel_set_error_state(ch_rx, -EIO);
+	}
+	ret = k_mem_slab_alloc(ch_rx->mem_slab,
+			       (void **)&i2s->buffers.p_rx_buffer,
+			       K_NO_WAIT);
+	if (ret < 0) {
+		irq_unlock(key);
+		LOG_ERROR("RX start: Failed allocate memory slab");
+		return channel_set_error_state(ch_rx, ret);
+	}
+	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
+		ret = interface_restart(i2s);
+	} else if (interface_get_state(i2s) == I2S_IF_READY) {
+		ret = interface_start(i2s);
+	}
+	irq_unlock(key);
+	if (ret < 0) {
+		LOG_ERROR("RX start: Failed to start/restart interface");
+		return channel_set_error_state(ch_rx, ret);
 	}
 	return 0;
 
@@ -1081,14 +1040,14 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 			case I2S_TRIGGER_DRAIN:
 				break;
 			default:
-				channel_error_service(ch_tx);
+				channel_set_error_state(ch_tx, 0);
 				return;
 			}
 		} else {
 			int ret = channel_change_state(ch_tx, I2S_STATE_READY);
 
 			if (ret != 0) {
-				channel_error_service(ch_tx);
+				channel_set_error_state(ch_tx, 0);
 				return;
 			}
 			if (ch_cmd == I2S_TRIGGER_DRAIN) {
@@ -1099,7 +1058,7 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 		return;
 	} else if (get_data_ret < 0) {
 		interface_error_service(i2s, "TX internal callback error");
-		channel_error_service(ch_tx);
+		channel_set_error_state(ch_tx, 0);
 		return;
 	} else if (channel_check_empty(ch_tx) == true) {
 		/*underrun error occurred*/
@@ -1108,7 +1067,7 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 					(void **)&mem_block);
 		}
 		interface_error_service(i2s, "TX underrun error");
-		channel_error_service(ch_tx);
+		channel_set_error_state(ch_tx, 0);
 		return;
 	}
 	/* continue transmission */
@@ -1125,7 +1084,7 @@ static void channel_rx_mem_clear(struct i2s_nrfx_interface *i2s,
 	while (queue_fetch(&ch_rx->mem_block_queue,
 			(void **)&mem_block,
 			&mem_block_size) != 0) {
-		if (k_sem_take(&ch_rx->sem, ch_rx->timeout * 10) < 0) {
+		if (k_sem_take(&ch_rx->sem, K_NO_WAIT) < 0) {
 			return;
 		}
 		k_mem_slab_free(ch_rx->mem_slab,
@@ -1160,7 +1119,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 				break;
 			default:
 				LOG_ERROR("RX Callback command unknown");
-				channel_error_service(ch_rx);
+				channel_set_error_state(ch_rx, 0);
 				return;
 			}
 		} else {
@@ -1175,7 +1134,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 			int ret = channel_change_state(ch_rx,
 					I2S_STATE_READY);
 			if (ret < 0) {
-				channel_error_service(ch_rx);
+				channel_set_error_state(ch_rx, 0);
 				return;
 			}
 		}
@@ -1194,7 +1153,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 		if (ret < 0) {
 			/*overrun error occurred*/
 			interface_error_service(i2s, "RX overrun error");
-			channel_error_service(ch_rx);
+			channel_set_error_state(ch_rx, 0);
 			return;
 		}
 	}
@@ -1279,10 +1238,10 @@ DEVICE_AND_API_INIT(i2s_##idx, DT_NORDIC_NRF_I2S_I2S_##idx##_LABEL,	       \
 									       \
 static void i2s_nrfx_irq_##idx##_config(struct device *dev)		       \
 {									       \
-	IRQ_CONNECT(DT_INST_##idx##_NORDIC_NRF_I2S_IRQ_0,		       \
-		DT_INST_##idx##_NORDIC_NRF_I2S_IRQ_0_PRIORITY,		       \
+	IRQ_CONNECT(DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0 ,		       \
+		DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0_PRIORITY,		       \
 		isr, DEVICE_GET(i2s_##idx), 0);				       \
-	irq_enable(DT_INST_##idx##_NORDIC_NRF_I2S_IRQ_0);		       \
+	irq_enable(DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0);		       \
 }
 
 static const struct i2s_driver_api i2s_nrf_driver_api = {
