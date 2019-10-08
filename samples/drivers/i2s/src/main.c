@@ -20,7 +20,7 @@
 
 
 #define USE_TX
-#define USE_RX
+//#define USE_RX
 
 #define NB_OF_SAMPLES			256
 #define NB_OF_CHANNELS			2
@@ -32,6 +32,8 @@
 #define TRANSFER_TIMEOUT_MS		\
 	((TRANSFER_BLOCK_TIME_US > 1000) ? \
 	(1 + TRANSFER_BLOCK_TIME_US / 1000) : (1))
+
+#warning it should include 32-bit samples too
 #if (SINGLE_SAMPLE_SIZE_BYTES == 1)
 typedef u8_t i2s_buf_t;
 #elif (SINGLE_SAMPLE_SIZE_BYTES == 2)
