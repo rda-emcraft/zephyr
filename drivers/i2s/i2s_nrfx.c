@@ -789,6 +789,7 @@ static int channel_change_state(struct channel_str *channel,
 		LOG_ERROR("Failed to change channel state");
 		return channel_set_error_state(channel, -EIO);
 	}
+	printk("%p: %u\n", channel, new_state);
 	channel->current_state = new_state;
 	return 0;
 }
