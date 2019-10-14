@@ -20,7 +20,7 @@
 
 
 #define USE_TX
-#define USE_RX
+//#define USE_RX
 
 #define NB_OF_SAMPLES			256
 #define NB_OF_CHANNELS			2
@@ -151,6 +151,7 @@ void main(void)
 		}
 #ifdef USE_TX
 		if (i == 10) {
+			printk("trg[%u] ", i);
 			if (i2s_trigger(dev,
 					I2S_DIR_TX, I2S_TRIGGER_START) != 0) {
 				/*error occured -
@@ -159,6 +160,7 @@ void main(void)
 				printk("[I2S]i2s_trigger(TX) returned error\n");
 				return;
 			}
+			printk("trg[end] ", i);
 			tx_running = true;
 			printk("[I2S]Starting TX\n");
 		}
@@ -170,6 +172,7 @@ void main(void)
 		alloc_res = k_mem_slab_alloc(i2sConfigTx.mem_slab, &my_tx_buf,
 			    (tx_running) ? (TRANSFER_TIMEOUT_MS) : (K_NO_WAIT));
 		if (alloc_res == 0) {
+			printk("%u ", i);
 			/*if valid operation fill the buffer by test samples*/
 			PREPARE_BUFFER(my_tx_buf,
 				       (NB_OF_SAMPLES * NB_OF_CHANNELS));
