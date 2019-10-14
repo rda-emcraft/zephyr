@@ -305,17 +305,16 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 
 	p_new_buffers.p_rx_buffer = NULL;
 	p_new_buffers.p_tx_buffer = NULL;
-	printk("tx 10(%p / %u) ", rx_str, rx_str->current_state);
-	if (rx_str != NULL && rx_str->current_state != I2S_STATE_READY) {
+	if (rx_str->current_state != I2S_STATE_READY &&
+	    rx_str->current_state != I2S_STATE_NOT_READY) {
 		rx_str->mng->data_handler(i2s, p_released, status,
 					  &p_new_buffers);
 	}
-	printk("tx 11 ");
-	if (tx_str != NULL && tx_str->current_state != I2S_STATE_READY) {
+	if (tx_str->current_state != I2S_STATE_READY &&
+	    tx_str->current_state != I2S_STATE_NOT_READY) {
 		tx_str->mng->data_handler(i2s, p_released, status,
 					  &p_new_buffers);
 	}
-	printk("tx 13 ");
 	if (next_buffers_needed(status)) {
 		if (interface_get_state(i2s) == I2S_IF_NEEDS_RESTART ||
 		    interface_get_state(i2s) == I2S_IF_STOPPING) {
@@ -801,12 +800,10 @@ static int channel_tx_start(struct i2s_nrfx_interface *i2s)
 	struct channel_str * const ch_tx = &i2s->channel_tx;
 	size_t mem_block_size;
 
-	printk("tx 1 ");
 	ret = channel_change_state(ch_tx, I2S_STATE_RUNNING);
 	if (ret < 0) {
 		return ret;
 	}
-	printk("tx 2 ");
 	key = irq_lock();
 	if (interface_get_state(i2s) != I2S_IF_RUNNING &&
 	    interface_get_state(i2s) != I2S_IF_READY) {
@@ -814,26 +811,22 @@ static int channel_tx_start(struct i2s_nrfx_interface *i2s)
 		LOG_ERROR("TX start: Invalid interface state");
 		return channel_set_error_state(ch_tx, -EIO);
 	}
-	printk("tx 3 ");
 	ret = ch_tx->mng->get_data(i2s,
 		(u32_t **)&i2s->buffers.p_tx_buffer, &mem_block_size);
 	if (ret < 0) {
 		LOG_ERROR("TX start: Failed to get data from queue");
 		return channel_set_error_state(ch_tx, ret);
 	}
-	printk("tx 4 ");
 	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
 		ret = interface_restart(i2s);
 	} else if (interface_get_state(i2s) == I2S_IF_READY) {
 		ret = interface_start(i2s);
 	}
-	printk("tx 5 ");
 	irq_unlock(key);
 	if (ret < 0) {
 		LOG_ERROR("TX start: Failed to start/restart interface");
 		return channel_set_error_state(ch_tx, ret);
 	}
-	printk("tx 6 ");
 	return 0;
 }
 
@@ -1108,6 +1101,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 	struct channel_str *ch_rx = &i2s->channel_rx;
 	int ret;
 
+	printk("rxc1\n");
 	if (p_released->p_rx_buffer != NULL && next_buffers_needed(status)) {
 		ret = ch_rx->mng->get_data(i2s,
 			     (u32_t **)&p_released->p_rx_buffer, &i2s->size);
@@ -1115,6 +1109,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 			return;
 		}
 	}
+	printk("rxc2\n");
 	if (ch_rx->current_state == I2S_STATE_STOPPING) {
 		enum i2s_trigger_cmd ch_cmd = ch_rx->last_trigger_cmd;
 
@@ -1155,6 +1150,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 	} else if (ch_rx->current_state == I2S_STATE_ERROR) {
 		return;
 	}
+	printk("rxc3\n");
 	if (next_buffers_needed(status)) {
 		ret = k_mem_slab_alloc(ch_rx->mem_slab,
 				       (void **)&p_new_buffers->p_rx_buffer,
