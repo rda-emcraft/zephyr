@@ -299,7 +299,6 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 	struct channel_str *rx_str = &i2s->channel_rx;
 	struct channel_str *tx_str = &i2s->channel_tx;
 	nrfx_i2s_buffers_t p_new_buffers;
-
 	p_new_buffers.p_rx_buffer = NULL;
 	p_new_buffers.p_tx_buffer = NULL;
 	if (rx_str->current_state != I2S_STATE_READY &&
@@ -309,14 +308,6 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 	}
 	if (tx_str->current_state != I2S_STATE_READY &&
 	    tx_str->current_state != I2S_STATE_NOT_READY) {
-		tx_str->mng->data_handler(i2s, p_released, status,
-					  &p_new_buffers);
-	}
-	if (rx_str != NULL && rx_str->current_state != I2S_STATE_READY) {
-		rx_str->mng->data_handler(i2s, p_released, status,
-					  &p_new_buffers);
-	}
-	if (tx_str != NULL && tx_str->current_state != I2S_STATE_READY) {
 		tx_str->mng->data_handler(i2s, p_released, status,
 					  &p_new_buffers);
 	}
