@@ -19,10 +19,10 @@
 #define I2S_DEV "I2S_0"
 
 
-//#define USE_TX
+#define USE_TX
 #define USE_RX
 
-#define NB_OF_SAMPLES			256
+#define NB_OF_SAMPLES			1024
 #define NB_OF_CHANNELS			2
 #define SINGLE_SAMPLE_SIZE_BYTES	3
 #define FRAME_CLOCK_FREQUENCY_HZ	1000
@@ -51,7 +51,16 @@ typedef u32_t i2s_buf_t;
 K_MEM_SLAB_DEFINE(i2sBufferTx, BLOCK_SIZE_BYTES,
 		  CONFIG_NRFX_I2S_TX_BLOCK_COUNT, 4);
 
-
+struct i2s_config i2sConfigTx = {
+		.word_size = WORD_SIZE_BITS,
+		.channels = NB_OF_CHANNELS,
+		.format = I2S_FMT_DATA_FORMAT_I2S,
+		.options = I2S_OPT_BIT_CLK_SLAVE,
+		.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ,
+		.mem_slab = &i2sBufferTx,
+		.block_size = BLOCK_SIZE_BYTES,
+		.timeout = TRANSFER_TIMEOUT_MS
+	};
 
 /*Macro for preparing test buffer to be sent*/
 #define PREPARE_BUFFER(buf, siz)	{			\
@@ -84,7 +93,9 @@ void main(void)
 	struct device *dev;
 	int ret = -1;
 
-	printk("[I2S]Starting example.\n\n[I2S]Configuration:\n");
+	printk("[I2S]Starting example.\n\n[I2S]Configuration(%s/%s):\n",
+			i2sConfigTx.options == 0 ? "MASTER" : "SLAVE",
+			i2sConfigRx.options == 0 ? "MASTER" : "SLAVE");
 	dev = device_get_binding(I2S_DEV);
 	if (dev == NULL) {
 		printk("[I2S]Driver not found\n");
@@ -121,16 +132,6 @@ void main(void)
 #ifdef USE_TX
 
 			{
-				struct i2s_config i2sConfigTx = {
-					.word_size = WORD_SIZE_BITS,
-					.channels = NB_OF_CHANNELS,
-					.format = I2S_FMT_DATA_FORMAT_I2S,
-					.options = 0,
-					.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ,
-					.mem_slab = &i2sBufferTx,
-					.block_size = BLOCK_SIZE_BYTES,
-					.timeout = TRANSFER_TIMEOUT_MS
-				};
 				i2sConfigTx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
 				ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
 				if (ret != 0) {

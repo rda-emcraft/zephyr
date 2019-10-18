@@ -347,9 +347,8 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
  * configuration functions
  */
 
-static void cfg_reinit(struct device *dev)
+static void cfg_reinit(struct i2s_nrfx_data *i2s)
 {
-	struct i2s_nrfx_data *i2s = get_interface();
 	struct channel_str *ch_tx = &i2s->channel_tx;
 	struct channel_str *ch_rx = &i2s->channel_rx;
 
@@ -474,9 +473,11 @@ static int cfg_periph_config(struct device *dev,
 		drv_cfg->channels = NRF_I2S_CHANNELS_STEREO;
 		break;
 	case 1:
-		interface_error_service(i2s,
-				"Config: Mono mode is not supported");
-		return -ENOTSUP;
+		//interface_error_service(i2s,
+		//		"Config: Mono mode is not supported");
+		//return -ENOTSUP;
+		drv_cfg->channels = NRF_I2S_CHANNELS_LEFT;
+		break;
 	default:
 		interface_error_service(i2s,
 				"Config: Invalid number of channels");
@@ -613,8 +614,9 @@ static int i2s_nrfx_read(struct device *dev, void **mem_block, size_t *size)
 
 	assert(dev != NULL && mem_block != NULL && size != NULL);
 	*size = 0;
-	if (ch_rx->current_state == I2S_STATE_NOT_READY ||
-	    ch_rx->current_state == I2S_STATE_ERROR) {
+	if ((ch_rx->current_state == I2S_STATE_NOT_READY ||
+	     ch_rx->current_state == I2S_STATE_ERROR) &&
+	     queue_is_empty(&ch_rx->mem_block_queue)) {
 		return -EIO;
 	}
 	ret = k_sem_take(&ch_rx->sem, ch_rx->timeout);
@@ -720,7 +722,6 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			LOG_ERROR("Failed to execute I2S_TRIGGER_PREPARE");
 			return -EIO;
 		}
-		cfg_reinit(dev);
 		ret = channel_drop(i2s, dir);
 		break;
 	}
@@ -906,6 +907,7 @@ static int channel_drop(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 			return ret;
 		}
 	} else {
+		cfg_reinit(i2s);
 		dir == I2S_DIR_RX ? channel_rx_mem_clear(i2s) :
 				channel_tx_mem_clear(i2s, NULL);
 	}
@@ -1084,6 +1086,10 @@ static void channel_rx_callback(struct i2s_nrfx_data *i2s,
 		   interface_get_state(i2s) == I2S_IF_NEEDS_RESTART) {
 		return;
 	} else if (ch_rx->current_state == I2S_STATE_ERROR) {
+		if (p_released->p_rx_buffer != NULL) {
+			k_mem_slab_free(ch_rx->mem_slab,
+					&p_released->p_rx_buffer);
+		}
 		return;
 	}
 	if (next_buffers_needed(status)) {
