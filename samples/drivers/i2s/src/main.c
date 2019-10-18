@@ -20,7 +20,7 @@
 
 
 #define USE_TX
-#define USE_RX
+//#define USE_RX
 
 #define NB_OF_SAMPLES			256
 #define NB_OF_CHANNELS			2
@@ -269,7 +269,7 @@ void main(void)
 			}
 		}
 #endif /*USE_RX*/
-		if (i == 100) {
+#ifdef STOP_AFTER	if (i == 100) {
 #ifdef USE_TX
 			{
 				struct i2s_config cfg = {
@@ -332,7 +332,7 @@ void main(void)
 			printk("zzzzzzzzzzzzzzzzzzzzzzzzzzzzz");
 			i = 0xFFFFFFFF;
 		}
-
+#endif /*STOP_AFTER*/
 	}
 	while (1) {
 
