@@ -19,13 +19,13 @@
 #define I2S_DEV "I2S_0"
 
 
-#define USE_TX
-//#define USE_RX
+//#define USE_TX
+#define USE_RX
 
 #define NB_OF_SAMPLES			256
 #define NB_OF_CHANNELS			2
 #define SINGLE_SAMPLE_SIZE_BYTES	3
-#define FRAME_CLOCK_FREQUENCY_HZ	48000
+#define FRAME_CLOCK_FREQUENCY_HZ	1000
 #define WORD_SIZE_BITS			(SINGLE_SAMPLE_SIZE_BYTES * 8)
 #define TRANSFER_BLOCK_TIME_US		\
 	((NB_OF_SAMPLES * 1000000) / FRAME_CLOCK_FREQUENCY_HZ)
@@ -71,7 +71,7 @@ struct i2s_config i2sConfigRx = {
 	.word_size = WORD_SIZE_BITS,
 	.channels = NB_OF_CHANNELS,
 	.format = I2S_FMT_DATA_FORMAT_I2S,
-	.options = 0,
+	.options = I2S_OPT_BIT_CLK_SLAVE,
 	.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ,
 	.mem_slab = &i2sBufferRx,
 	.block_size = BLOCK_SIZE_BYTES,
@@ -226,7 +226,7 @@ void main(void)
 			 * gives handler to received data. For more details
 			 * refer to I2S API zephyr description
 			 */
-			printk("r");
+
 			my_rx_buf = NULL;
 			read_res = i2s_read(dev, &my_rx_buf, &rcv_size);
 			if (read_res == 0) {
@@ -238,13 +238,13 @@ void main(void)
 				 * values while printing received data -
 				 * it may cause TX underrun errors
 				 */
-				/*printk("%u, %p: %X %X %X %X %X %X %X %X\n",
+				printk("%u, %p: %X %X %X %X %X %X %X %X\n",
 						 rcv_size, rcv_data,
 						 rcv_data[0], rcv_data[1],
 						 rcv_data[2], rcv_data[3],
 						 rcv_data[4], rcv_data[5],
 						 rcv_data[6], rcv_data[7]
-							       );*/
+							       );
 #ifdef CHECK_DATA
 				if (last_value != 0) {
 					i2s_buf_t val = last_value;
@@ -257,7 +257,6 @@ void main(void)
 				}
 				last_value = rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS - 1];
 #endif //CHECK_DATA
-
 				/*after use free allocated buffer*/
 				k_mem_slab_free(i2sConfigRx.mem_slab,
 						 &my_rx_buf);

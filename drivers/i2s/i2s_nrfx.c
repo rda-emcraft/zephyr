@@ -461,13 +461,14 @@ static int cfg_periph_config(struct device *dev,
 		interface_error_service(i2s, "Config: Invalid format data");
 		return -EINVAL;
 	}
+	drv_cfg->mode = NRF_I2S_MODE_MASTER;
 	if ((i2s_cfg->options & I2S_OPT_FRAME_CLK_SLAVE) ||
 	    (i2s_cfg->options & I2S_OPT_BIT_CLK_SLAVE)) {
 		drv_cfg->mode = NRF_I2S_MODE_SLAVE;
-		interface_error_service(i2s, "Config: Invalid options");
-		return -ENOTSUP;
+		//interface_error_service(i2s, "Config: Invalid options");
+		//return -ENOTSUP;
 	}
-	drv_cfg->mode = NRF_I2S_MODE_MASTER;
+
 	switch (i2s_cfg->channels) {
 	case 2:
 		drv_cfg->channels = NRF_I2S_CHANNELS_STEREO;
