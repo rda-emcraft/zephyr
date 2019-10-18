@@ -24,7 +24,7 @@ LOG_MODULE_REGISTER(i2s_nrfx, CONFIG_I2S_LOG_LEVEL);
 #define DEV_DATA(dev) \
 	((struct i2s_nrfx_data *const)(dev)->driver_data)
 
-struct i2s_nrfx_interface;
+struct i2s_nrfx_data;
 
 enum i2s_if_state {
 	I2S_IF_NOT_READY = 0,
@@ -45,30 +45,11 @@ struct i2s_nrfx_config {
 	void (*instance_init)(struct device *dev);
 };
 
-struct queue_item {
-	void *data;
-	u32_t size;
-};
-
 struct queue {
-	struct queue_item *queue_items;
+	void **queue_items;
 	u8_t read_idx;
 	u8_t write_idx;
 	u8_t len;
-};
-
-struct dir_mng {
-	int (*start)(struct i2s_nrfx_interface *i2s);
-	int (*stop)(struct i2s_nrfx_interface *i2s);
-	int (*drop)(struct i2s_nrfx_interface *i2s);
-	int (*drain)(struct i2s_nrfx_interface *i2s);
-	void (*data_handler)(struct i2s_nrfx_interface *i2s,
-			     nrfx_i2s_buffers_t const *p_released,
-			     u32_t status, nrfx_i2s_buffers_t *p_new_buffers);
-	int (*get_data)(struct i2s_nrfx_interface *i2s, u32_t **buf,
-			size_t *block_size);
-	void (*mem_clear)(struct i2s_nrfx_interface *i2s,
-			  void const *first_block);
 };
 
 struct channel_str {
@@ -78,10 +59,10 @@ struct channel_str {
 	enum i2s_state current_state;
 	struct queue mem_block_queue;
 	enum i2s_trigger_cmd last_trigger_cmd;
-	struct dir_mng const *mng;
+	struct i2s_config config;
 };
 
-struct i2s_nrfx_interface {
+struct i2s_nrfx_data {
 	enum i2s_if_state state;
 	size_t size;
 	nrfx_i2s_buffers_t buffers;
@@ -89,27 +70,26 @@ struct i2s_nrfx_interface {
 	struct channel_str channel_rx;
 };
 
-struct i2s_nrfx_data {
-	nrfx_i2s_config_t nrfx_driver_config;
-	struct i2s_nrfx_interface interface;
-};
-
-static int i2s_nrfx_channel_get(enum i2s_dir dir,
-			    struct i2s_nrfx_data *const dev_data,
-			    struct channel_str **channel);
-
+static struct channel_str *channel_get(struct i2s_nrfx_data *i2s,
+						 enum i2s_dir dir);
+static inline struct i2s_nrfx_data *get_interface(void);
+static int interface_set_state(struct i2s_nrfx_data *i2s,
+				enum i2s_if_state new_state);
+static int channel_stop(struct i2s_nrfx_data *i2s, enum i2s_dir dir);
+static int channel_drop(struct i2s_nrfx_data *i2s, enum i2s_dir dir);
+static int channel_drain(struct i2s_nrfx_data *i2s, enum i2s_dir dir);
+static int channel_start(struct i2s_nrfx_data *i2s, enum i2s_dir dir);
+static int channel_rx_store_data(struct i2s_nrfx_data *i2s, u32_t **buf);
+static int channel_tx_get_data(struct i2s_nrfx_data *i2s, u32_t **buf);
 static int channel_change_state(struct channel_str *channel,
 				 enum i2s_state new_state);
-
-static inline struct i2s_nrfx_interface *get_interface(
-				struct device *dev __attribute__((unused)));
-
-static inline int channel_set_error_state(struct channel_str *channel,
-					   int err_code);
-
-static int interface_set_state(struct i2s_nrfx_interface *i2s,
-				enum i2s_if_state new_state);
-
+static void channel_tx_callback(struct i2s_nrfx_data *i2s,
+			nrfx_i2s_buffers_t const *p_released,
+			u32_t status, nrfx_i2s_buffers_t *p_new_buffers);
+static void channel_rx_callback(struct i2s_nrfx_data *i2s,
+			nrfx_i2s_buffers_t const *p_released,
+			u32_t status, nrfx_i2s_buffers_t *p_new_buffers);
+static void channel_mem_clear(struct i2s_nrfx_data *i2s, enum i2s_dir dir);
 static inline bool next_buffers_needed(u32_t status)
 {
 	return (status & NRFX_I2S_STATUS_NEXT_BUFFERS_NEEDED)
@@ -126,8 +106,13 @@ static inline void queue_idx_inc(u8_t *idx, u8_t limit)
 	*idx = (++(*idx) < limit) ? (*idx) : 0;
 }
 
+static inline bool queue_is_empty(struct queue *queue)
+{
+	return (queue->read_idx == queue->write_idx) ? true : false;
+}
+
 static void queue_init(struct queue *queue, u8_t len,
-		       struct queue_item *queue_items)
+		       void **queue_items)
 {
 	queue->read_idx = 0;
 	queue->write_idx = 0;
@@ -135,35 +120,29 @@ static void queue_init(struct queue *queue, u8_t len,
 	queue->queue_items = queue_items;
 }
 
-static int queue_add(struct queue *queue, void *data, u32_t size)
+static int queue_add(struct queue *queue, void *data)
 {
 	u8_t wr_idx = queue->write_idx;
 
+	assert(queue != NULL && data != NULL);
 	queue_idx_inc(&wr_idx, queue->len);
 	if (wr_idx == queue->read_idx) {
 		/* cannot overwrite unread data */
 		return -ENOMEM;
 	}
 
-	queue->queue_items[queue->write_idx].data = data;
-	queue->queue_items[queue->write_idx].size = size;
+	queue->queue_items[queue->write_idx] = data;
 	queue->write_idx = wr_idx;
 	return 0;
 }
 
-static inline bool queue_is_empty(struct queue *queue)
+static int queue_fetch(struct queue *queue, void **data)
 {
-	return (queue->read_idx == queue->write_idx) ? true : false;
-}
-
-static int queue_fetch(struct queue *queue, void **data, u32_t *size)
-{
+	assert(queue != NULL && data != NULL);
 	if (queue_is_empty(queue)) {
 		return -ENOMEM;
 	}
-	*data = queue->queue_items[queue->read_idx].data;
-	*size = queue->queue_items[queue->read_idx].size;
-
+	*data = queue->queue_items[queue->read_idx];
 	queue_idx_inc(&queue->read_idx, queue->len);
 	return 0;
 }
@@ -172,19 +151,21 @@ static int queue_fetch(struct queue *queue, void **data, u32_t *size)
  * Interface service functions
  */
 
-static void interface_error_service(struct i2s_nrfx_interface *i2s,
+static void interface_error_service(struct i2s_nrfx_data *i2s,
 					const char * const err_msg)
 {
+	assert(i2s != NULL);
 	interface_set_state(i2s, I2S_IF_ERROR);
 	LOG_ERROR(err_msg);
 	nrfx_i2s_stop();
 }
 
-static int interface_set_state(struct i2s_nrfx_interface *i2s,
+static int interface_set_state(struct i2s_nrfx_data *i2s,
 				enum i2s_if_state new_state)
 {
 	bool change_forbidden = false;
 
+	assert(i2s != NULL);
 	switch (new_state) {
 	case I2S_IF_STOPPING:
 		if (i2s->state != I2S_IF_RUNNING &&
@@ -231,17 +212,18 @@ static int interface_set_state(struct i2s_nrfx_interface *i2s,
 }
 
 static inline enum i2s_if_state interface_get_state(
-					struct i2s_nrfx_interface *i2s)
+					struct i2s_nrfx_data *i2s)
 {
+	assert(i2s != NULL);
 	return i2s->state;
 }
 
-static int interface_restart(struct i2s_nrfx_interface *i2s)
+static int interface_restart(struct i2s_nrfx_data *i2s)
 {
 	return interface_set_state(i2s, I2S_IF_NEEDS_RESTART);
 }
 
-static int interface_stop(struct i2s_nrfx_interface *i2s)
+static int interface_stop(struct i2s_nrfx_data *i2s)
 {
 	int ret;
 
@@ -253,19 +235,25 @@ static int interface_stop(struct i2s_nrfx_interface *i2s)
 	return 0;
 }
 
-static int interface_stop_restart(struct i2s_nrfx_interface *i2s,
+static int interface_stop_restart(struct i2s_nrfx_data *i2s,
+				struct channel_str *channel_to_stop_restart,
 				enum i2s_state other_channel_state)
 {
 	int ret;
 
+	ret = channel_change_state(channel_to_stop_restart,
+					I2S_STATE_STOPPING);
+	if (ret < 0) {
+		return ret;
+	}
 	if (other_channel_state == I2S_STATE_RUNNING) {
 		ret = interface_restart(i2s);
-		if (ret != 0) {
+		if (ret < 0) {
 			return ret;
 		}
 	} else {
 		ret = interface_stop(i2s);
-		if (ret != 0) {
+		if (ret < 0) {
 			interface_error_service(i2s,
 				"Failed to restart interface");
 			return ret;
@@ -274,12 +262,12 @@ static int interface_stop_restart(struct i2s_nrfx_interface *i2s,
 	return 0;
 }
 
-static int interface_start(struct i2s_nrfx_interface *i2s)
+static int interface_start(struct i2s_nrfx_data *i2s)
 {
 	int ret;
 
 	ret = interface_set_state(i2s, I2S_IF_RUNNING);
-	if (ret != 0) {
+	if (ret < 0) {
 		return ret;
 	}
 
@@ -298,20 +286,21 @@ static int interface_start(struct i2s_nrfx_interface *i2s)
 static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 				    u32_t status)
 {
-	struct i2s_nrfx_interface *i2s = get_interface(NULL);
+	struct i2s_nrfx_data *i2s = get_interface();
 	struct channel_str *rx_str = &i2s->channel_rx;
 	struct channel_str *tx_str = &i2s->channel_tx;
 	nrfx_i2s_buffers_t p_new_buffers;
+
 	p_new_buffers.p_rx_buffer = NULL;
 	p_new_buffers.p_tx_buffer = NULL;
 	if (rx_str->current_state != I2S_STATE_READY &&
 	    rx_str->current_state != I2S_STATE_NOT_READY) {
-		rx_str->mng->data_handler(i2s, p_released, status,
+		channel_rx_callback(i2s, p_released, status,
 					  &p_new_buffers);
 	}
 	if (tx_str->current_state != I2S_STATE_READY &&
 	    tx_str->current_state != I2S_STATE_NOT_READY) {
-		tx_str->mng->data_handler(i2s, p_released, status,
+		channel_tx_callback(i2s, p_released, status,
 					  &p_new_buffers);
 	}
 	if (next_buffers_needed(status)) {
@@ -319,17 +308,19 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 		    interface_get_state(i2s) == I2S_IF_STOPPING) {
 			nrfx_i2s_stop();
 			return;
-		} else if (nrfx_i2s_next_buffers_set(&p_new_buffers) !=
-			   NRFX_SUCCESS) {
-			nrfx_i2s_stop();
-			interface_error_service(i2s, "Internal service error");
-			return;
-
-		}
-		if ((p_new_buffers.p_rx_buffer == NULL)
-		    && (p_new_buffers.p_tx_buffer == NULL)) {
-			nrfx_i2s_stop();
-			return;
+		} else if (interface_get_state(i2s) == I2S_IF_RUNNING) {
+			if (nrfx_i2s_next_buffers_set(&p_new_buffers) !=
+						NRFX_SUCCESS) {
+				nrfx_i2s_stop();
+				interface_error_service(i2s,
+						"Internal service error");
+				return;
+			}
+			if ((p_new_buffers.p_rx_buffer == NULL)
+			    && (p_new_buffers.p_tx_buffer == NULL)) {
+				nrfx_i2s_stop();
+				return;
+			}
 		}
 		i2s->buffers = p_new_buffers;
 	} else {
@@ -358,7 +349,7 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 
 static void cfg_reinit(struct device *dev)
 {
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
+	struct i2s_nrfx_data *i2s = get_interface();
 	struct channel_str *ch_tx = &i2s->channel_tx;
 	struct channel_str *ch_rx = &i2s->channel_rx;
 
@@ -414,41 +405,36 @@ static void cfg_match_clock_settings(nrfx_i2s_config_t *config,
 }
 
 static int cfg_periph_config(struct device *dev,
+			     nrfx_i2s_config_t *const drv_cfg,
 			     struct i2s_config const *i2s_cfg)
 {
 	const struct i2s_nrfx_config *const dev_const_cfg = DEV_CFG(dev);
-	struct i2s_nrfx_data *const dev_data = DEV_DATA(dev);
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
-	nrfx_i2s_config_t drv_cfg = {
-		.sck_pin = dev_const_cfg->sck_pin,
-		.lrck_pin = dev_const_cfg->lrck_pin,
-		.mck_pin = dev_const_cfg->mck_pin,
-		.sdout_pin = dev_const_cfg->sdout_pin,
-		.sdin_pin = dev_const_cfg->sdin_pin,
-	};
+	struct i2s_nrfx_data *i2s = get_interface();
 
-#warning zapytac Andrzeja o podwojne asercje
-	assert(i2s_cfg != NULL && dev != NULL && dev_data != NULL);
+	assert(drv_cfg != NULL);
+	drv_cfg->sck_pin = dev_const_cfg->sck_pin;
+	drv_cfg->lrck_pin = dev_const_cfg->lrck_pin;
+	drv_cfg->mck_pin = dev_const_cfg->mck_pin;
+	drv_cfg->sdout_pin = dev_const_cfg->sdout_pin;
+	drv_cfg->sdin_pin = dev_const_cfg->sdin_pin;
 	if (i2s_cfg->mem_slab == NULL) {
 		interface_error_service(i2s, "Config: Invalid memory slab");
 		return -EINVAL;
 	}
-	if (dev_data) {
-		switch (i2s_cfg->word_size) {
-		case 8:
-			drv_cfg.sample_width = NRF_I2S_SWIDTH_8BIT;
-			break;
-		case 16:
-			drv_cfg.sample_width = NRF_I2S_SWIDTH_16BIT;
-			break;
-		case 24:
-			drv_cfg.sample_width = NRF_I2S_SWIDTH_24BIT;
-			break;
-		default:
-			interface_error_service(i2s,
-					"Config: Invalid word size");
-			return -EINVAL;
-		}
+	switch (i2s_cfg->word_size) {
+	case 8:
+		drv_cfg->sample_width = NRF_I2S_SWIDTH_8BIT;
+		break;
+	case 16:
+		drv_cfg->sample_width = NRF_I2S_SWIDTH_16BIT;
+		break;
+	case 24:
+		drv_cfg->sample_width = NRF_I2S_SWIDTH_24BIT;
+		break;
+	default:
+		interface_error_service(i2s,
+				"Config: Invalid word size");
+		return -EINVAL;
 	}
 	if (i2s_cfg->frame_clk_freq == 0) {
 		interface_error_service(i2s,
@@ -457,18 +443,18 @@ static int cfg_periph_config(struct device *dev,
 	}
 	switch (i2s_cfg->format & I2S_FMT_DATA_FORMAT_MASK) {
 	case I2S_FMT_DATA_FORMAT_I2S:
-		drv_cfg.alignment = NRF_I2S_ALIGN_LEFT;
-		drv_cfg.format = NRF_I2S_FORMAT_I2S;
+		drv_cfg->alignment = NRF_I2S_ALIGN_LEFT;
+		drv_cfg->format = NRF_I2S_FORMAT_I2S;
 		break;
 
 	case I2S_FMT_DATA_FORMAT_LEFT_JUSTIFIED:
-		drv_cfg.alignment = NRF_I2S_ALIGN_LEFT;
-		drv_cfg.format = NRF_I2S_FORMAT_ALIGNED;
+		drv_cfg->alignment = NRF_I2S_ALIGN_LEFT;
+		drv_cfg->format = NRF_I2S_FORMAT_ALIGNED;
 		break;
 
 	case I2S_FMT_DATA_FORMAT_RIGHT_JUSTIFIED:
-		drv_cfg.alignment = NRF_I2S_ALIGN_RIGHT;
-		drv_cfg.format = NRF_I2S_FORMAT_ALIGNED;
+		drv_cfg->alignment = NRF_I2S_ALIGN_RIGHT;
+		drv_cfg->format = NRF_I2S_FORMAT_ALIGNED;
 		break;
 
 	default:
@@ -477,14 +463,14 @@ static int cfg_periph_config(struct device *dev,
 	}
 	if ((i2s_cfg->options & I2S_OPT_FRAME_CLK_SLAVE) ||
 	    (i2s_cfg->options & I2S_OPT_BIT_CLK_SLAVE)) {
-		drv_cfg.mode = NRF_I2S_MODE_SLAVE;
+		drv_cfg->mode = NRF_I2S_MODE_SLAVE;
 		interface_error_service(i2s, "Config: Invalid options");
 		return -ENOTSUP;
 	}
-	drv_cfg.mode = NRF_I2S_MODE_MASTER;
+	drv_cfg->mode = NRF_I2S_MODE_MASTER;
 	switch (i2s_cfg->channels) {
 	case 2:
-		drv_cfg.channels = NRF_I2S_CHANNELS_STEREO;
+		drv_cfg->channels = NRF_I2S_CHANNELS_STEREO;
 		break;
 	case 1:
 		interface_error_service(i2s,
@@ -501,9 +487,7 @@ static int cfg_periph_config(struct device *dev,
 		return -EINVAL;
 	}
 	i2s->size = i2s_cfg->block_size;
-	cfg_match_clock_settings(&drv_cfg, i2s_cfg);
-	memcpy(&dev_data->nrfx_driver_config, &drv_cfg,
-	       sizeof(nrfx_i2s_config_t));
+	cfg_match_clock_settings(drv_cfg, i2s_cfg);
 	return 0;
 }
 
@@ -513,29 +497,12 @@ static int cfg_periph_config(struct device *dev,
  *
  */
 
-static int i2s_nrfx_channel_get(enum i2s_dir dir,
-			    struct i2s_nrfx_data *const dev_data,
-			    struct channel_str **channel)
-{
-	assert(dev_data != NULL);
-	switch (dir) {
-	case I2S_DIR_RX:
-		*channel = &dev_data->interface.channel_rx;
-		break;
-	case I2S_DIR_TX:
-		*channel = &dev_data->interface.channel_tx;
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-
 static int i2s_nrfx_initialize(struct device *dev)
 {
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
+	struct i2s_nrfx_data *i2s = get_interface();
 	const struct i2s_nrfx_config *const dev_const_cfg = DEV_CFG(dev);
 
+	assert(dev != NULL);
 	k_sem_init(&i2s->channel_rx.sem, 0, CONFIG_NRFX_I2S_RX_BLOCK_COUNT);
 	k_sem_init(&i2s->channel_tx.sem, CONFIG_NRFX_I2S_TX_BLOCK_COUNT,
 		   CONFIG_NRFX_I2S_TX_BLOCK_COUNT);
@@ -546,38 +513,43 @@ static int i2s_nrfx_initialize(struct device *dev)
 static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 			   struct i2s_config *i2s_cfg)
 {
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
-	struct i2s_nrfx_data *const dev_data = DEV_DATA(dev);
+	struct i2s_nrfx_data *i2s = get_interface();
+	nrfx_i2s_config_t drv_cfg;
 	struct channel_str *channel;
 	int ret;
 	nrfx_err_t status;
 
-	assert(i2s_cfg != NULL && dev != NULL && dev_data != NULL);
-	ret = i2s_nrfx_channel_get(dir, dev_data, &channel);
-	if (ret != 0) {
+	assert(i2s_cfg != NULL && dev != NULL);
+	channel = channel_get(i2s, dir);
+	if (channel == NULL) {
 		interface_error_service(i2s,
 			"Config: Invalid channel direction");
 		return -EINVAL;
 	}
 
+	/*reinit mode*/
 	if (i2s_cfg->frame_clk_freq == 0) {
 		if (channel->current_state == I2S_STATE_RUNNING) {
-			ret = channel->mng->drop(i2s);
+			ret = channel_drop(i2s, dir);
 			if (ret < 0) {
 				LOG_ERROR("Error trigger while execution");
-				return channel_set_error_state(channel, ret);
+				channel_change_state(channel, I2S_STATE_ERROR);
+				return ret;
 			}
 		} else if (channel->current_state == I2S_STATE_STOPPING) {
 			return -EIO;
 		}
 		channel_change_state(channel, I2S_STATE_NOT_READY);
+		channel_mem_clear(i2s, dir);
 		return 0;
 	}
-	ret = cfg_periph_config(dev, i2s_cfg);
+
+	ret = cfg_periph_config(dev, &drv_cfg, i2s_cfg);
 	/* disable channels in case of invalid configuration*/
-	if (ret != 0) {
+	if (ret < 0) {
 		LOG_ERROR("Config: Failed to configure peripheral");
-		return channel_set_error_state(channel, ret);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return ret;
 	}
 	if (dir == I2S_DIR_RX) {
 		i2s->buffers.p_rx_buffer = NULL;
@@ -588,44 +560,58 @@ static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 	channel->mem_slab = i2s_cfg->mem_slab;
 	channel->timeout = i2s_cfg->timeout;
 	ret = channel_change_state(channel, I2S_STATE_READY);
-	if (ret != 0) {
-		return channel_set_error_state(channel, ret);
+	if (ret < 0) {
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return ret;
 	}
 
 	if (interface_get_state(i2s) == I2S_IF_NOT_READY) {
-		status = nrfx_i2s_init(&dev_data->nrfx_driver_config,
-				       interface_handler);
+		status = nrfx_i2s_init(&drv_cfg, interface_handler);
 		if (status != NRFX_SUCCESS) {
 			if (status == NRFX_ERROR_INVALID_STATE) {
 				LOG_ERROR("Config: NRFX Invalid state");
-				return channel_set_error_state(channel,
-							       -EINVAL);
+				channel_change_state(channel, I2S_STATE_ERROR);
+				return -EINVAL;
 			} else if (status == NRFX_ERROR_INVALID_PARAM) {
 				LOG_ERROR("Config: NRFX Invalid parameter");
-				return channel_set_error_state(channel,
-							       -EINVAL);
-			} else {
-				LOG_ERROR("Config: NRFX General error");
-				return channel_set_error_state(channel,
-							       -ENOTSUP);
+				channel_change_state(channel, I2S_STATE_ERROR);
+				return -EINVAL;
 			}
+			LOG_ERROR("Config: NRFX General error");
+			channel_change_state(channel, I2S_STATE_ERROR);
+			return -ENOTSUP;
 		}
 		ret = interface_set_state(i2s, I2S_IF_READY);
 		if (ret < 0) {
-			return channel_set_error_state(channel, -ENOTSUP);
+			channel_change_state(channel, I2S_STATE_ERROR);
+			return -ENOTSUP;
 		}
 	} else if (interface_get_state(i2s) != I2S_IF_READY) {
 		LOG_ERROR("Config: Interface must be in ready state");
-		return channel_set_error_state(channel, -ENOTSUP);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return -ENOTSUP;
 	}
+	memcpy(&channel->config, i2s_cfg, sizeof(struct i2s_config));
 	return ret;
+}
+
+static struct i2s_config *i2s_nrfx_config_get(struct device *dev,
+					     enum i2s_dir dir)
+{
+	struct i2s_nrfx_data *i2s = get_interface();
+
+	assert(dev != NULL);
+	return &channel_get(i2s, dir)->config;
 }
 
 static int i2s_nrfx_read(struct device *dev, void **mem_block, size_t *size)
 {
-	struct channel_str *ch_rx = &get_interface(dev)->channel_rx;
+	struct i2s_nrfx_data *i2s = get_interface();
+	struct channel_str *ch_rx = &i2s->channel_rx;
 	int ret;
 
+	assert(dev != NULL && mem_block != NULL && size != NULL);
+	*size = 0;
 	if (ch_rx->current_state == I2S_STATE_NOT_READY ||
 	    ch_rx->current_state == I2S_STATE_ERROR) {
 		return -EIO;
@@ -634,63 +620,72 @@ static int i2s_nrfx_read(struct device *dev, void **mem_block, size_t *size)
 	if (ret < 0) {
 		return ret;
 	}
-	ret = queue_fetch(&ch_rx->mem_block_queue, mem_block, size);
-
+	ret = queue_fetch(&ch_rx->mem_block_queue, mem_block);
 	if (ret < 0) {
 		return -EIO;
 	}
+	*size = i2s->size;
 	return 0;
 }
 
 static int i2s_nrfx_write(struct device *dev, void *mem_block, size_t size)
 {
-	struct channel_str *ch_tx = &get_interface(dev)->channel_tx;
+	struct i2s_nrfx_data *i2s = get_interface();
+	struct channel_str *ch_tx = &i2s->channel_tx;
 	int ret;
 
+	assert(dev != NULL && mem_block != NULL);
 	if (ch_tx->current_state != I2S_STATE_READY &&
 	    ch_tx->current_state != I2S_STATE_RUNNING) {
 		return -EIO;
 	}
-
+	if (size != i2s->size) {
+		LOG_ERROR("Invalid size");
+		return -EINVAL;
+	}
 	ret = k_sem_take(&ch_tx->sem, ch_tx->timeout);
 	if (ret < 0) {
 		return ret;
 	}
-	ret = queue_add(&ch_tx->mem_block_queue, mem_block, size);
+	ret = queue_add(&ch_tx->mem_block_queue, mem_block);
 	if (ret < 0) {
 		return ret;
 	}
 	return 0;
 }
 
+
+
 static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			    enum i2s_trigger_cmd cmd)
 {
-	struct i2s_nrfx_data *dev_data = DEV_DATA(dev);
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
+	struct i2s_nrfx_data *i2s = get_interface();
 	struct channel_str *channel;
 	int ret;
 
-	if ((interface_get_state(i2s) != I2S_IF_READY) &&
-	    (interface_get_state(i2s) != I2S_IF_RUNNING)) {
+	assert(dev != NULL);
+	if ((interface_get_state(i2s) == I2S_IF_STOPPING) ||
+	    (interface_get_state(i2s) == I2S_IF_NEEDS_RESTART)) {
 		if (cmd != I2S_TRIGGER_PREPARE) {
+			/* This case is not an error - it only provides
+			 * that user can't trigger at the moment due to the
+			 * unstable interface state (it's just changing).
+			 * User should call it again after while. The API
+			 * doesn't provide return value for this case.
+			 */
 			LOG_INF("Wait for stable state");
 			return -EIO;
 		}
 	}
-
-	ret = i2s_nrfx_channel_get(dir, dev_data, &channel);
-	if (ret != 0) {
-		return ret;
-	}
-
+	channel = channel_get(i2s, dir);
+	assert(channel != NULL);
 	switch (cmd) {
 	case I2S_TRIGGER_START:
 		if (channel->current_state != I2S_STATE_READY) {
 			LOG_ERROR("Failed to execute I2S_TRIGGER_START");
 			return -EIO;
 		}
-		ret = channel->mng->start(i2s);
+		ret = channel_start(i2s, dir);
 		break;
 
 	case I2S_TRIGGER_STOP:
@@ -699,7 +694,7 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			LOG_ERROR("Failed to execute I2S_TRIGGER_STOP");
 			return -EIO;
 		}
-		ret = channel->mng->stop(i2s);
+		ret = channel_stop(i2s, dir);
 		break;
 
 	case I2S_TRIGGER_DRAIN:
@@ -707,7 +702,7 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			LOG_ERROR("Failed to execute I2S_TRIGGER_DRAIN");
 			return -EIO;
 		}
-		ret = channel->mng->drain(i2s);
+		ret = channel_drain(i2s, dir);
 		break;
 
 	case I2S_TRIGGER_DROP:
@@ -715,7 +710,7 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			LOG_ERROR("Failed to execute I2S_TRIGGER_DROP");
 			return -EIO;
 		}
-		ret = channel->mng->drop(i2s);
+		ret = channel_drop(i2s, dir);
 		break;
 
 	case I2S_TRIGGER_PREPARE:
@@ -725,16 +720,18 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
 			return -EIO;
 		}
 		cfg_reinit(dev);
-		channel->mng->drop(i2s);
+		ret = channel_drop(i2s, dir);
 		break;
 	}
 	default:
 		LOG_ERROR("Invalid trigger command");
-		return channel_set_error_state(channel, -EINVAL);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return -EINVAL;
 	}
 	if (ret < 0) {
 		LOG_ERROR("Error trigger while execution");
-		return channel_set_error_state(channel, ret);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return ret;
 	}
 	channel->last_trigger_cmd = cmd;
 	return 0;
@@ -744,11 +741,17 @@ static int i2s_nrfx_trigger(struct device *dev, enum i2s_dir dir,
  * channel management functions
  */
 
-static inline int channel_set_error_state(struct channel_str *channel,
-					   int err_code)
+static struct channel_str *channel_get(struct i2s_nrfx_data *i2s,
+						 enum i2s_dir dir)
 {
-	channel_change_state(channel, I2S_STATE_ERROR);
-	return err_code;
+	assert(i2s != NULL);
+	switch (dir) {
+	case I2S_DIR_RX:
+		return &i2s->channel_rx;
+	case I2S_DIR_TX:
+		return &i2s->channel_tx;
+	}
+	return NULL;
 }
 
 static int channel_change_state(struct channel_str *channel,
@@ -757,6 +760,7 @@ static int channel_change_state(struct channel_str *channel,
 	bool change_forbidden = false;
 	enum i2s_state old_state = channel->current_state;
 
+	assert(channel != NULL);
 	switch (new_state) {
 		break;
 	case I2S_STATE_READY:
@@ -778,27 +782,27 @@ static int channel_change_state(struct channel_str *channel,
 	case I2S_STATE_ERROR:
 		break;
 	default:
-
 		LOG_ERROR("Invalid channel state");
-		return channel_set_error_state(channel, -EINVAL);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return -EINVAL;
 	}
 
 	if (change_forbidden) {
 		LOG_ERROR("Failed to change channel state");
-		return channel_set_error_state(channel, -EIO);
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return -EIO;
 	}
 	channel->current_state = new_state;
 	return 0;
 }
 
-static int channel_tx_start(struct i2s_nrfx_interface *i2s)
+static int channel_start(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 {
 	int ret;
 	unsigned int key;
-	struct channel_str * const ch_tx = &i2s->channel_tx;
-	size_t mem_block_size;
+	struct channel_str * const channel_to_start = channel_get(i2s, dir);
 
-	ret = channel_change_state(ch_tx, I2S_STATE_RUNNING);
+	ret = channel_change_state(channel_to_start, I2S_STATE_RUNNING);
 	if (ret < 0) {
 		return ret;
 	}
@@ -806,14 +810,23 @@ static int channel_tx_start(struct i2s_nrfx_interface *i2s)
 	if (interface_get_state(i2s) != I2S_IF_RUNNING &&
 	    interface_get_state(i2s) != I2S_IF_READY) {
 		irq_unlock(key);
-		LOG_ERROR("TX start: Invalid interface state");
-		return channel_set_error_state(ch_tx, -EIO);
+		LOG_ERROR("Invalid interface state");
+		channel_change_state(channel_to_start, I2S_STATE_ERROR);
+		return -EIO;
 	}
-	ret = ch_tx->mng->get_data(i2s,
-		(u32_t **)&i2s->buffers.p_tx_buffer, &mem_block_size);
+	if (dir == I2S_DIR_RX) {
+		ret = k_mem_slab_alloc(channel_to_start->mem_slab,
+			(void **)&i2s->buffers.p_rx_buffer, K_NO_WAIT);
+	} else {
+		ret = channel_tx_get_data(i2s,
+			(u32_t **)&i2s->buffers.p_tx_buffer);
+	}
 	if (ret < 0) {
-		LOG_ERROR("TX start: Failed to get data from queue");
-		return channel_set_error_state(ch_tx, ret);
+		irq_unlock(key);
+		LOG_ERROR(dir == I2S_DIR_RX ? "Memory allocation error" :
+				      "Queue fetching error");
+		channel_change_state(channel_to_start, I2S_STATE_ERROR);
+		return ret;
 	}
 	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
 		ret = interface_restart(i2s);
@@ -822,151 +835,98 @@ static int channel_tx_start(struct i2s_nrfx_interface *i2s)
 	}
 	irq_unlock(key);
 	if (ret < 0) {
-		LOG_ERROR("TX start: Failed to start/restart interface");
-		return channel_set_error_state(ch_tx, ret);
-	}
-	return 0;
-}
-
-static int channel_rx_start(struct i2s_nrfx_interface *i2s)
-{
-	int ret;
-	unsigned int key;
-	struct channel_str * const ch_rx = &i2s->channel_rx;
-
-	ret = channel_change_state(ch_rx, I2S_STATE_RUNNING);
-	if (ret < 0) {
+		LOG_ERROR("Failed to start/restart interface");
+		channel_change_state(channel_to_start, I2S_STATE_ERROR);
 		return ret;
 	}
-	key = irq_lock();
-	if (interface_get_state(i2s) != I2S_IF_RUNNING &&
-	    interface_get_state(i2s) != I2S_IF_READY) {
-		irq_unlock(key);
-		LOG_ERROR("RX start: Invalid interface state");
-		return channel_set_error_state(ch_rx, -EIO);
-	}
-	ret = k_mem_slab_alloc(ch_rx->mem_slab,
-			       (void **)&i2s->buffers.p_rx_buffer,
-			       K_NO_WAIT);
-	if (ret < 0) {
-		irq_unlock(key);
-		LOG_ERROR("RX start: Failed allocate memory slab");
-		return channel_set_error_state(ch_rx, ret);
-	}
-	if (interface_get_state(i2s) == I2S_IF_RUNNING) {
-		ret = interface_restart(i2s);
-	} else if (interface_get_state(i2s) == I2S_IF_READY) {
-		ret = interface_start(i2s);
-	}
-	irq_unlock(key);
-	if (ret < 0) {
-		LOG_ERROR("RX start: Failed to start/restart interface");
-		return channel_set_error_state(ch_rx, ret);
-	}
 	return 0;
-
 }
-static void channel_tx_mem_clear(struct i2s_nrfx_interface *i2s,
+
+static void channel_tx_mem_clear(struct i2s_nrfx_data *i2s,
 				 void const *first_block)
 {
 	struct channel_str * const ch_tx = &i2s->channel_tx;
 	void *mem_block = (void *)first_block;
-	size_t mem_block_size;
 
+	assert(i2s != NULL);
 	if (first_block == NULL) {
-		if (ch_tx->mng->get_data(i2s, (u32_t **)&mem_block,
-		    &mem_block_size) != 0) {
+		if (channel_tx_get_data(i2s, (u32_t **)&mem_block) != 0) {
 			return;
 		}
 	}
 	do {
 		k_mem_slab_free(ch_tx->mem_slab,
 			(void **)&mem_block);
-	} while (ch_tx->mng->get_data(i2s,
-				(u32_t **)&mem_block, &mem_block_size) == 0);
+	} while (channel_tx_get_data(i2s, (u32_t **)&mem_block) == 0);
 	while (ch_tx->sem.count < ch_tx->sem.limit) {
 		k_sem_give(&ch_tx->sem);
 	}
 }
 
-static int channel_tx_stop(struct i2s_nrfx_interface *i2s)
+static void channel_rx_mem_clear(struct i2s_nrfx_data *i2s)
 {
-	int ret;
 	struct channel_str * const ch_rx = &i2s->channel_rx;
-	struct channel_str * const ch_tx = &i2s->channel_tx;
+	void *mem_block;
 
-	ret = channel_change_state(ch_tx, I2S_STATE_STOPPING);
-	if (ret < 0) {
-		return ret;
+	assert(i2s != NULL);
+	while (queue_fetch(&ch_rx->mem_block_queue,
+				(void **)&mem_block) == 0) {
+		k_mem_slab_free(ch_rx->mem_slab, (void **)&mem_block);
 	}
-	return interface_stop_restart(i2s, ch_rx->current_state);
+	while (ch_rx->sem.count) {
+		if (k_sem_take(&ch_rx->sem, K_NO_WAIT) < 0) {
+			return;
+		}
+	}
 }
 
-static int channel_tx_drain(struct i2s_nrfx_interface *i2s)
+static void channel_mem_clear(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 {
-	struct channel_str * const ch_tx = &i2s->channel_tx;
-
-	return channel_change_state(ch_tx, I2S_STATE_STOPPING);
+	if (dir == I2S_DIR_RX) {
+		channel_rx_mem_clear(i2s);
+	} else {
+		channel_tx_mem_clear(i2s, NULL);
+	}
 }
 
-static int channel_tx_drop(struct i2s_nrfx_interface *i2s)
+static int channel_drop(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 {
 	int ret;
-	struct channel_str * const ch_rx = &i2s->channel_rx;
-	struct channel_str * const ch_tx = &i2s->channel_tx;
+	struct channel_str * const channel_to_drop = channel_get(i2s, dir);
+	struct channel_str * const other_channel = channel_get(i2s,
+			dir == I2S_DIR_TX ? I2S_DIR_RX : I2S_DIR_TX);
 
-	if (ch_tx->current_state == I2S_STATE_RUNNING) {
-		ret = channel_change_state(ch_tx, I2S_STATE_STOPPING);
-		if (ret < 0) {
-			return ret;
-		}
-		ret = interface_stop_restart(i2s, ch_rx->current_state);
+	if (channel_to_drop->current_state == I2S_STATE_RUNNING) {
+		ret =  interface_stop_restart(i2s, channel_to_drop,
+					      other_channel->current_state);
 		if (ret < 0) {
 			interface_error_service(i2s,
 					"Failed to restart interface");
 			return ret;
 		}
 	} else {
-		ch_tx->mng->mem_clear(i2s, NULL);
+		dir == I2S_DIR_RX ? channel_rx_mem_clear(i2s) :
+				channel_tx_mem_clear(i2s, NULL);
 	}
 	return 0;
 }
 
-static int channel_rx_stop(struct i2s_nrfx_interface *i2s)
+static int channel_stop(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 {
-	int ret;
-	struct channel_str * const ch_rx = &i2s->channel_rx;
-	struct channel_str * const ch_tx = &i2s->channel_tx;
+	struct channel_str * const channel_to_stop = channel_get(i2s, dir);
+	struct channel_str * const other_channel = channel_get(i2s,
+			dir == I2S_DIR_TX ? I2S_DIR_RX : I2S_DIR_TX);
 
-	ret = channel_change_state(ch_rx, I2S_STATE_STOPPING);
-	if (ret < 0) {
-		return ret;
-	}
-	return interface_stop_restart(i2s, ch_tx->current_state);
-
+	return interface_stop_restart(i2s, channel_to_stop,
+				      other_channel->current_state);
 }
 
-static int channel_rx_drop(struct i2s_nrfx_interface *i2s)
+static int channel_drain(struct i2s_nrfx_data *i2s, enum i2s_dir dir)
 {
-	int ret;
-	struct channel_str * const ch_rx = &i2s->channel_rx;
-	struct channel_str * const ch_tx = &i2s->channel_tx;
+	struct channel_str * const channel_to_drain = channel_get(i2s, dir);
 
-	if (ch_tx->current_state == I2S_STATE_RUNNING) {
-		ret = channel_change_state(ch_rx, I2S_STATE_STOPPING);
-		if (ret < 0) {
-			return ret;
-		}
-		ret =  interface_stop_restart(i2s, ch_tx->current_state);
-		if (ret < 0) {
-			interface_error_service(i2s,
-					"Failed to restart interface");
-			return ret;
-		}
-	} else {
-		ch_rx->mng->mem_clear(i2s, NULL);
-	}
-	return 0;
+	return dir == I2S_DIR_RX ? channel_stop(i2s, dir) :
+		 channel_change_state(channel_to_drain, I2S_STATE_STOPPING);
 }
 
 static bool channel_check_empty(struct channel_str *channel)
@@ -974,13 +934,13 @@ static bool channel_check_empty(struct channel_str *channel)
 	return queue_is_empty(&channel->mem_block_queue);
 }
 
-static int channel_tx_get_data(struct i2s_nrfx_interface *i2s,
-			       u32_t **buf, size_t *block_size)
+static int channel_tx_get_data(struct i2s_nrfx_data *i2s, u32_t **buf)
 {
 	struct channel_str *ch_tx = &i2s->channel_tx;
 	int ret;
 
-	ret = queue_fetch(&ch_tx->mem_block_queue, (void **)buf, block_size);
+	assert(i2s != NULL);
+	ret = queue_fetch(&ch_tx->mem_block_queue, (void **)buf);
 	if (ret < 0) {
 		return ret;
 	}
@@ -988,12 +948,11 @@ static int channel_tx_get_data(struct i2s_nrfx_interface *i2s,
 	return 0;
 }
 
-static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
-				nrfx_i2s_buffers_t const *p_released,
-				u32_t status, nrfx_i2s_buffers_t *p_new_buffers)
+static void channel_tx_callback(struct i2s_nrfx_data *i2s,
+			nrfx_i2s_buffers_t const *p_released,
+			u32_t status, nrfx_i2s_buffers_t *p_new_buffers)
 {
 	struct channel_str *ch_tx = &i2s->channel_tx;
-	size_t mem_block_size;
 	u32_t *mem_block = NULL;
 	int get_data_ret = 1;
 
@@ -1005,8 +964,7 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 				      (void **)&p_released->p_tx_buffer);
 			}
 		}
-		get_data_ret = ch_tx->mng->get_data(i2s, &mem_block,
-					       &mem_block_size);
+		get_data_ret = channel_tx_get_data(i2s, &mem_block);
 		if (get_data_ret == 0) {
 			k_mem_slab_free(ch_tx->mem_slab,
 					(void **)&mem_block);
@@ -1018,8 +976,7 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 				(void **)&p_released->p_tx_buffer);
 	}
 	if (next_buffers_needed(status)) {
-		get_data_ret = ch_tx->mng->get_data(i2s, &mem_block,
-					       &mem_block_size);
+		get_data_ret = channel_tx_get_data(i2s, &mem_block);
 	}
 	if (ch_tx->current_state == I2S_STATE_STOPPING) {
 		enum i2s_trigger_cmd ch_cmd = ch_tx->last_trigger_cmd;
@@ -1028,7 +985,7 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 			switch (ch_cmd) {
 			case I2S_TRIGGER_DROP:
 				if (get_data_ret == 0) {
-					ch_tx->mng->mem_clear(i2s, mem_block);
+					channel_tx_mem_clear(i2s, mem_block);
 				}
 				break;
 			case I2S_TRIGGER_STOP:
@@ -1040,25 +997,26 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 			case I2S_TRIGGER_DRAIN:
 				break;
 			default:
-				channel_set_error_state(ch_tx, 0);
+				channel_change_state(ch_tx, I2S_STATE_ERROR);
 				return;
 			}
 		} else {
 			int ret = channel_change_state(ch_tx, I2S_STATE_READY);
 
-			if (ret != 0) {
-				channel_set_error_state(ch_tx, 0);
+			if (ret < 0) {
+				channel_change_state(ch_tx, I2S_STATE_ERROR);
 				return;
 			}
 			if (ch_cmd == I2S_TRIGGER_DRAIN) {
 				return;
 			}
 		}
+		i2s->buffers.p_tx_buffer = NULL;
 	} else if (ch_tx->current_state == I2S_STATE_ERROR) {
 		return;
 	} else if (get_data_ret < 0) {
 		interface_error_service(i2s, "TX internal callback error");
-		channel_set_error_state(ch_tx, 0);
+		channel_change_state(ch_tx, I2S_STATE_ERROR);
 		return;
 	} else if (channel_check_empty(ch_tx) == true) {
 		/*underrun error occurred*/
@@ -1067,41 +1025,23 @@ static void channel_tx_callback(struct i2s_nrfx_interface *i2s,
 					(void **)&mem_block);
 		}
 		interface_error_service(i2s, "TX underrun error");
-		channel_set_error_state(ch_tx, 0);
+		channel_change_state(ch_tx, I2S_STATE_ERROR);
 		return;
 	}
 	/* continue transmission */
 	p_new_buffers->p_tx_buffer = mem_block;
 }
 
-static void channel_rx_mem_clear(struct i2s_nrfx_interface *i2s,
-				 void const *first_block)
-{
-	struct channel_str * const ch_rx = &i2s->channel_rx;
-	void *mem_block;
-	size_t mem_block_size;
-
-	while (queue_fetch(&ch_rx->mem_block_queue,
-			(void **)&mem_block,
-			&mem_block_size) != 0) {
-		if (k_sem_take(&ch_rx->sem, K_NO_WAIT) < 0) {
-			return;
-		}
-		k_mem_slab_free(ch_rx->mem_slab,
-			(void **)&mem_block);
-	}
-}
-
-static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
-				nrfx_i2s_buffers_t const *p_released,
-				u32_t status, nrfx_i2s_buffers_t *p_new_buffers)
+static void channel_rx_callback(struct i2s_nrfx_data *i2s,
+			nrfx_i2s_buffers_t const *p_released,
+			u32_t status, nrfx_i2s_buffers_t *p_new_buffers)
 {
 	struct channel_str *ch_rx = &i2s->channel_rx;
 	int ret;
 
 	if (p_released->p_rx_buffer != NULL && next_buffers_needed(status)) {
-		ret = ch_rx->mng->get_data(i2s,
-			     (u32_t **)&p_released->p_rx_buffer, &i2s->size);
+		ret = channel_rx_store_data(i2s,
+					   (u32_t **)&p_released->p_rx_buffer);
 		if (ret < 0) {
 			return;
 		}
@@ -1112,21 +1052,20 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 		if (next_buffers_needed(status)) {
 			switch (ch_cmd) {
 			case I2S_TRIGGER_DROP:
-				ch_rx->mng->mem_clear(i2s, NULL);
+				channel_rx_mem_clear(i2s);
 				break;
 			case I2S_TRIGGER_DRAIN:
 			case I2S_TRIGGER_STOP:
 				break;
 			default:
 				LOG_ERROR("RX Callback command unknown");
-				channel_set_error_state(ch_rx, 0);
+				channel_change_state(ch_rx, I2S_STATE_ERROR);
 				return;
 			}
 		} else {
 			if (p_released->p_rx_buffer) {
-				ret = ch_rx->mng->get_data(i2s,
-					(u32_t **)&p_released->p_rx_buffer,
-					&i2s->size);
+				ret = channel_rx_store_data(i2s,
+					(u32_t **)&p_released->p_rx_buffer);
 				if (ret < 0) {
 					return;
 				}
@@ -1134,7 +1073,7 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 			int ret = channel_change_state(ch_rx,
 					I2S_STATE_READY);
 			if (ret < 0) {
-				channel_set_error_state(ch_rx, 0);
+				channel_change_state(ch_rx, I2S_STATE_ERROR);
 				return;
 			}
 		}
@@ -1153,18 +1092,19 @@ static void channel_rx_callback(struct i2s_nrfx_interface *i2s,
 		if (ret < 0) {
 			/*overrun error occurred*/
 			interface_error_service(i2s, "RX overrun error");
-			channel_set_error_state(ch_rx, 0);
+			channel_change_state(ch_rx, I2S_STATE_ERROR);
 			return;
 		}
 	}
 }
 
-static int channel_rx_get_data(struct i2s_nrfx_interface *i2s,
-			       u32_t **buf, size_t *block_size)
+static int channel_rx_store_data(struct i2s_nrfx_data *i2s, u32_t **buf)
 {
 	struct channel_str *ch_rx = &i2s->channel_rx;
-	int ret = queue_add(&ch_rx->mem_block_queue, *buf, *block_size);
+	int ret;
 
+	assert(i2s != NULL);
+	ret = queue_add(&ch_rx->mem_block_queue, *buf);
 	if (ret < 0) {
 		return ret;
 	}
@@ -1175,10 +1115,9 @@ static int channel_rx_get_data(struct i2s_nrfx_interface *i2s,
 
 static void isr(void *arg)
 {
-	struct device *dev = (struct device *)arg;
-	struct i2s_nrfx_interface *i2s = get_interface(dev);
+	struct i2s_nrfx_data *i2s = get_interface();
 
-	nrfx_i2s_irq_handler(/*arg*/);
+	nrfx_i2s_irq_handler();
 	if (interface_get_state(i2s) == I2S_IF_RESTARTING) {
 		int ret = interface_start(i2s);
 
@@ -1190,13 +1129,13 @@ static void isr(void *arg)
 }
 
 #define I2S_NRFX_DEVICE(idx)						       \
-static struct queue_item q_rx_##idx##_buf[CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1]; \
-static struct queue_item q_tx_##idx##_buf[CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1]; \
+static void *q_rx_##idx##_buf[CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1];	       \
+static void *q_tx_##idx##_buf[CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1];	       \
 static void i2s_nrfx_irq_##idx##_config(struct device *dev);		       \
 									       \
 static void setup_instance_##idx(struct device *dev)			       \
 {									       \
-	struct i2s_nrfx_interface *i2s = get_interface(dev);		       \
+	struct i2s_nrfx_data *i2s = get_interface();			       \
 									       \
 	queue_init(&i2s->channel_tx.mem_block_queue,			       \
 		CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1, &q_tx_##idx##_buf[0]);     \
@@ -1215,19 +1154,15 @@ static const struct i2s_nrfx_config channel_cfg_##idx = {		       \
 };									       \
 									       \
 static struct i2s_nrfx_data channels_data_##idx = {			       \
-	.interface = {							       \
-		.state = I2S_IF_NOT_READY,				       \
-		.size = 0,						       \
-		.channel_tx = {						       \
-			.current_state = I2S_STATE_NOT_READY,		       \
-			.last_trigger_cmd = I2S_TRIGGER_PREPARE,	       \
-			.mng = &ch_mng.tx,				       \
-		},							       \
-		.channel_rx = {						       \
-			.current_state = I2S_STATE_NOT_READY,		       \
-			.last_trigger_cmd = I2S_TRIGGER_PREPARE,	       \
-			.mng = &ch_mng.rx,				       \
-		}							       \
+	.state = I2S_IF_NOT_READY,					       \
+	.size = 0,							       \
+	.channel_tx = {							       \
+		.current_state = I2S_STATE_NOT_READY,			       \
+		.last_trigger_cmd = I2S_TRIGGER_PREPARE,		       \
+	},								       \
+	.channel_rx = {							       \
+		.current_state = I2S_STATE_NOT_READY,			       \
+		.last_trigger_cmd = I2S_TRIGGER_PREPARE,		       \
 	}								       \
 };									       \
 									       \
@@ -1238,7 +1173,7 @@ DEVICE_AND_API_INIT(i2s_##idx, DT_NORDIC_NRF_I2S_I2S_##idx##_LABEL,	       \
 									       \
 static void i2s_nrfx_irq_##idx##_config(struct device *dev)		       \
 {									       \
-	IRQ_CONNECT(DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0 ,		       \
+	IRQ_CONNECT(DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0,		       \
 		DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0_PRIORITY,		       \
 		isr, DEVICE_GET(i2s_##idx), 0);				       \
 	irq_enable(DT_NORDIC_NRF_I2S_I2S_##idx##_IRQ_0);		       \
@@ -1249,40 +1184,12 @@ static const struct i2s_driver_api i2s_nrf_driver_api = {
 	.read = i2s_nrfx_read,
 	.write = i2s_nrfx_write,
 	.trigger = i2s_nrfx_trigger,
-};
-
-struct channels_management {
-	struct dir_mng rx;
-	struct dir_mng tx;
-};
-
-static const struct channels_management ch_mng = {
-	.rx = {
-		.start = channel_rx_start,
-		.stop = channel_rx_stop,
-		.drain = channel_rx_stop,
-		.drop = channel_rx_drop,
-		.data_handler = channel_rx_callback,
-		.get_data = channel_rx_get_data,
-		.mem_clear = channel_rx_mem_clear,
-	},
-	.tx = {
-		.start = channel_tx_start,
-		.stop = channel_tx_stop,
-		.drain = channel_tx_drain,
-		.drop = channel_tx_drop,
-		.data_handler = channel_tx_callback,
-		.get_data = channel_tx_get_data,
-		.mem_clear = channel_tx_mem_clear,
-	},
+	.config_get = i2s_nrfx_config_get,
 };
 
 I2S_NRFX_DEVICE(0);
 
-static inline struct i2s_nrfx_interface *get_interface(
-				struct device *dev __attribute__((unused)))
+static inline struct i2s_nrfx_data *get_interface(void)
 {
-	struct i2s_nrfx_data *const dev_data = DEV_DATA(DEVICE_GET(i2s_0));
-
-	return &dev_data->interface;
+	return DEV_DATA(DEVICE_GET(i2s_0));
 }
