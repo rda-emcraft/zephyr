@@ -27,6 +27,7 @@
 		uart-0 = &uart0;
 		uart-1 = &uart1;
 		adc-0 = &adc;
+		comp-0 = &comp;
 		gpio-0 = &gpio0;
 		gpio-1 = &gpio1;
 		gpiote-0 = &gpiote;

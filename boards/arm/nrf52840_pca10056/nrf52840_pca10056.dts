@@ -115,6 +115,10 @@
 	status = "okay";
 };
 
+&comp {
+	status = "okay";
+};
+
 &gpiote {
 	status = "okay";
 };
