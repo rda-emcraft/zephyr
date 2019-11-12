@@ -117,6 +117,18 @@
 	status = "okay";
 };
 
+&comp0 {
+	status = "okay";
+	ain0-pin = <2>;
+	ain1-pin = <3>;
+	ain2-pin = <4>;
+	ain3-pin = <5>;
+	ain4-pin = <28>;
+	ain5-pin = <29>;
+	ain6-pin = <30>;
+	ain7-pin = <31>;
+};
+
 &gpiote {
 	status = "okay";
 };

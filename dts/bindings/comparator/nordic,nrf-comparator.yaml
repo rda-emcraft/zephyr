@@ -1,0 +1,58 @@
+# Copyright (c) 2019 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+title: Nordic comparator
+
+description: >
+    Binding for the Nordic comparator module
+
+compatible: "nordic,nrf-comparator"
+
+include: base.yaml
+
+properties:
+    reg:
+      required: true
+
+    interrupts:
+      required: true
+
+    ain0-pin:
+      type: int
+      required: false
+      description: analog input 0
+
+    ain1-pin:
+      type: int 
+      required: false
+      description: analog input 1
+
+    ain2-pin:
+      type: int 
+      required: false
+      description: analog input 2
+
+    ain3-pin:
+      type: int 
+      required: false
+      description: analog input 3
+
+    ain4-pin:
+      type: int 
+      required: false
+      description: analog input 4
+
+    ain5-pin:
+      type: int 
+      required: false
+      description: analog input 5
+
+    ain6-pin:
+      type: int 
+      required: false
+      description: analog input 6
+
+    ain7-pin:
+      type: int 
+      required: false
+      description: analog input 7
