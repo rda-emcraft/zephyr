@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config NRF5_COMP_EXAMPLE
+	bool
+	default y
+
+# Include Zephyr's Kconfig.
+source "$ZEPHYR_BASE/Kconfig"

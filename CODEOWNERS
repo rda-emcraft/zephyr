@@ -300,6 +300,7 @@
 /lib/updatehub/                           @chtavares592 @otavio
 /samples/bluetooth/                       @sjanc @jhedberg @Vudentz
 /samples/boards/intel_s1000_crb/          @sathishkuttan @dcpleung @nashif
+/samples/boards/nrf52/comparator/         @adamkondraciuk
 /samples/display/                         @vanwinkeljan
 /samples/drivers/CAN/                     @alexanderwachter
 /samples/drivers/ht16k33/                 @henrikbrixandersen

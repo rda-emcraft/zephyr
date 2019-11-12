@@ -1,0 +1,6 @@
+sample:
+  name: comparator usage sample
+tests:
+  sample.board.nrf52.nrfx:
+    platform_whitelist: nrf52840_pca10056
+    tags: board
