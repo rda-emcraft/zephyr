@@ -55,7 +55,7 @@ struct i2s_config i2sConfigTx = {
 		.word_size = WORD_SIZE_BITS,
 		.channels = NB_OF_CHANNELS,
 		.format = I2S_FMT_DATA_FORMAT_I2S,
-		.options = 0,
+		.options = I2S_OPT_BIT_CLK_GATED,
 		.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ,
 		.mem_slab = &i2sBufferTx,
 		.block_size = BLOCK_SIZE_BYTES,
@@ -80,7 +80,7 @@ struct i2s_config i2sConfigRx = {
 	.word_size = WORD_SIZE_BITS,
 	.channels = NB_OF_CHANNELS,
 	.format = I2S_FMT_DATA_FORMAT_I2S,
-	.options = 0,
+	.options = I2S_OPT_BIT_CLK_GATED,
 	.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ,
 	.mem_slab = &i2sBufferRx,
 	.block_size = BLOCK_SIZE_BYTES,
@@ -239,6 +239,7 @@ void main(void)
 				 * values while printing received data -
 				 * it may cause TX underrun errors
 				 */
+				//printk("state: %u / %u ", i2s_state_get(dev, I2S_DIR_TX), i2s_state_get(dev, I2S_DIR_RX));
 				printk("%u, %p: %X %X %X %X %X %X %X %X\n",
 						 rcv_size, rcv_data,
 						 rcv_data[0], rcv_data[1],
