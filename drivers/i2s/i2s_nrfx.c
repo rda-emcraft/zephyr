@@ -17,15 +17,27 @@
 
 LOG_MODULE_REGISTER(i2s_nrfx, CONFIG_I2S_LOG_LEVEL);
 
+static char events[4096];
+static u32_t ev_cnt;
+static inline void EvLog(char txt)
+{
+	events[ev_cnt ++] = txt;
+	events[ev_cnt] = '\0';
+}
+void EvPrint(void)
+{
+	printk((char*)events);
+	ev_cnt = 0;
+}
+
+
 #define LOG_ERROR(msg) LOG_ERR("\r\n[%s:%u]: %s\r\n", __func__, __LINE__, msg)
 
 #define DEV_CFG(dev) \
 	(const struct i2s_nrfx_config *const)((dev)->config->config_info)
 #define DEV_DATA(dev) \
 	((struct i2s_nrfx_data *const)(dev)->driver_data)
-
-struct i2s_nrfx_data;
-
+volatile u32_t global_stat;
 enum i2s_if_state {
 	I2S_IF_NOT_READY = 0,
 	I2S_IF_READY,
@@ -297,36 +309,46 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 	struct channel_str *rx_str = &i2s->channel_rx;
 	struct channel_str *tx_str = &i2s->channel_tx;
 	nrfx_i2s_buffers_t p_new_buffers;
-
+	global_stat = status;
 	/* Call callbacks for tx/rx channels if they are not in idle state*/
 	p_new_buffers.p_rx_buffer = NULL;
 	p_new_buffers.p_tx_buffer = NULL;
-	if (rx_str->current_state != I2S_STATE_READY &&
-	    rx_str->current_state != I2S_STATE_NOT_READY) {
-		channel_rx_callback(i2s, p_released, status,
-					  &p_new_buffers);
-	}
 	if (tx_str->current_state != I2S_STATE_READY &&
 	    tx_str->current_state != I2S_STATE_NOT_READY) {
 		channel_tx_callback(i2s, p_released, status,
 					  &p_new_buffers);
 	}
-
+	if (rx_str->current_state != I2S_STATE_READY &&
+	    rx_str->current_state != I2S_STATE_NOT_READY) {
+		channel_rx_callback(i2s, p_released, status,
+					  &p_new_buffers);
+	}
 	if (next_buffers_needed(status)) {
 		if (interface_get_state(i2s) == I2S_IF_NEEDS_RESTART ||
 		    interface_get_state(i2s) == I2S_IF_STOPPING) {
+			/* if driver needs new buffers but user requested
+			 * interface state change (e.g. called i2s_trigger())
+			 * then peripheral needs to be stopped. In this case
+			 * there is no need to set new buffers for driver.
+			 * On next callback execution (this one will be caused
+			 * by 'EVENT_STOPPED' - look 'else' below) interface
+			 * will change state to:
+			 *  - 'I2S_IF_RESTARTING' if there is at least one
+			 *    channel involved in trasmission
+			 *  - 'I2S_IF_STOPPING' if no more data transmission
+			 *    needed
+			 */
 			nrfx_i2s_stop();
 			return;
 		} else if (interface_get_state(i2s) == I2S_IF_RUNNING) {
+			/* if driver requested new buffers and interface works
+			 * normally then just set them
+			 * (store 'TXD.PTR'/'RXD.PTR' registers)
+			 */
 			if (nrfx_i2s_next_buffers_set(&p_new_buffers) !=
 						NRFX_SUCCESS) {
 				interface_error_service(i2s,
 						"Internal service error");
-				return;
-			}
-			if ((p_new_buffers.p_rx_buffer == NULL)
-			    && (p_new_buffers.p_tx_buffer == NULL)) {
-				nrfx_i2s_stop();
 				return;
 			}
 		}
@@ -442,6 +464,7 @@ static int cfg_periph_config(struct device *dev,
 		break;
 	default:
 		if (i2s_cfg->word_size < 8 || i2s_cfg->word_size > 32) {
+			/*this value isn't compatible with I2S standard*/
 			interface_error_service(i2s,
 					"Config: Invalid word size");
 			return -EINVAL;
@@ -684,6 +707,7 @@ static int i2s_nrfx_read(struct device *dev, void **mem_block, size_t *size)
 		return -EIO;
 	}
 	*size = i2s->size;
+	EvPrint();
 	return 0;
 }
 
@@ -1000,9 +1024,12 @@ static int channel_tx_get_data(struct i2s_nrfx_data *i2s, u32_t **buf)
 }
 
 /* In case of constant tx transmission this callback:
- * - frees tx buffer which has been just transmitted via I2S interface
+ * - frees tx buffer which has just been transmitted via I2S interface
  * - gets new buffer from queue which will be passed to nrfx driver as
- *   next to be transfere (content of 'TXD.PTR' register).
+ *   next to be transfered (content of 'TXD.PTR' register).
+ *   Status parameter informs about handler execution reason:
+ *   - if 1 - next buffer is needed
+ *   - if 0 - tranfer is finishing
  */
 static void channel_tx_callback(struct i2s_nrfx_data *i2s,
 			nrfx_i2s_buffers_t const *p_released,
@@ -1014,14 +1041,20 @@ static void channel_tx_callback(struct i2s_nrfx_data *i2s,
 
 	if (ch_tx->current_state == I2S_STATE_RUNNING &&
 	    interface_get_state(i2s) == I2S_IF_NEEDS_RESTART) {
-		/* Tx channel transmits data constantly while rx channel
-		 * is beginning/finishing its transfer  user called
-		 *' i2s_triggerP' with 'I2S_DIR_RX' parameter)).
+		/* This code services case when tx channel transmits data
+		 * constantly while rx channel is beginning/finishing its
+		 * transfer (user called' i2s_trigger()' with 'I2S_DIR_RX'
+		 * parameter)).
 		 * In this case NRF I2S peripheral needs to be restarted.
-		 * If status = 0 (hamdF_I2S_EVENT_STOPPED)
 		 */
 		if (p_released->p_tx_buffer != NULL) {
 			if (next_buffers_needed(status)) {
+				/* when interface needs to be restarted and
+				 * last event was 'EVENT_STOPPED' then we don't
+				 * free this buffer - it will be used after
+				 * after interface restarts - tx transmission
+				 * will be still running
+				 */
 				k_mem_slab_free(ch_tx->mem_slab,
 				      (void **)&p_released->p_tx_buffer);
 			}
@@ -1041,6 +1074,7 @@ static void channel_tx_callback(struct i2s_nrfx_data *i2s,
 		get_data_ret = channel_tx_get_data(i2s, &mem_block);
 	}
 	if (ch_tx->current_state == I2S_STATE_STOPPING) {
+		/* finishing tx transfer caused by user trigger command*/
 		enum i2s_trigger_cmd ch_cmd = ch_tx->last_trigger_cmd;
 
 		if (next_buffers_needed(status)) {
@@ -1094,6 +1128,14 @@ static void channel_tx_callback(struct i2s_nrfx_data *i2s,
 	p_new_buffers->p_tx_buffer = mem_block;
 }
 
+/* In case of constant rx transmission this callback:
+ * - stores in queue rx buffer which has just been received via I2S interface
+ * - allocates new rx buffer for next transfer purpose
+ * Status parameter informs about handler execution reason:
+ *   - if 1 - next buffer is needed
+ *   - if 0 - tranfer is finishing
+ */
+volatile u32_t firstOne;
 static void channel_rx_callback(struct i2s_nrfx_data *i2s,
 			nrfx_i2s_buffers_t const *p_released,
 			u32_t status, nrfx_i2s_buffers_t *p_new_buffers)
@@ -1101,14 +1143,28 @@ static void channel_rx_callback(struct i2s_nrfx_data *i2s,
 	struct channel_str *ch_rx = &i2s->channel_rx;
 	int ret;
 
-	if (p_released->p_rx_buffer != NULL && next_buffers_needed(status)) {
-		ret = channel_rx_store_data(i2s,
-					   (u32_t **)&p_released->p_rx_buffer);
-		if (ret < 0) {
-			return;
+	if (p_released->p_rx_buffer != NULL) {
+		EvLog('P');
+		if (next_buffers_needed(status)) {
+			EvLog('C');
+			/* when interface needs to be restarted and
+			 * last event was 'EVENT_STOPPED' then we don't
+			 * free this buffer - it will be used after
+			 * after interface restarts - tx transmission
+			 * will be still running
+			 */
+			//printk("=%x=", (u32_t *)(*p_released->p_rx_buffer));
+			firstOne = *((u32_t*)p_released->p_rx_buffer);
+			ret = channel_rx_store_data(i2s,
+						   (u32_t **)&p_released->p_rx_buffer);
+			//printk("=%x=", (u32_t *)(*p_released->p_rx_buffer));
+			if (ret < 0) {
+				return;
+			}
 		}
 	}
 	if (ch_rx->current_state == I2S_STATE_STOPPING) {
+		/* finishing rx transfer caused by user trigger command*/
 		enum i2s_trigger_cmd ch_cmd = ch_rx->last_trigger_cmd;
 
 		if (next_buffers_needed(status)) {
@@ -1181,8 +1237,14 @@ static int channel_rx_store_data(struct i2s_nrfx_data *i2s, u32_t **buf)
 
 static void isr(void *arg)
 {
+	u32_t rp = *((u32_t*)(0x40025000 + 0x104));
+	u32_t tp = *((u32_t*)(0x40025000 + 0x114));
+	u32_t sp = *((u32_t*)(0x40025000 + 0x108));
+	EvLog(rp ? 'R' : ' ');
+	EvLog(tp ? 'T' : ' ');
+	EvLog(sp ? 'S' : ' ');
+	EvLog('\n');
 	struct i2s_nrfx_data *i2s = get_interface();
-
 	/* 'nrfx_i2s_irq_handler()' calls 'interface_handler()' which in turn
 	 * can call:
 	 *  - 'channel_tx_callback()' when tx channel is running
@@ -1205,8 +1267,8 @@ static void isr(void *arg)
 }
 
 #define I2S_NRFX_DEVICE(idx)						       \
-static void *q_rx_##idx##_buf[CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1];	       \
-static void *q_tx_##idx##_buf[CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1];	       \
+static volatile void *q_rx_##idx##_buf[CONFIG_NRFX_I2S_RX_BLOCK_COUNT + 1];	       \
+static volatile void *q_tx_##idx##_buf[CONFIG_NRFX_I2S_TX_BLOCK_COUNT + 1];	       \
 static void i2s_nrfx_irq_##idx##_config(struct device *dev);		       \
 									       \
 static void setup_instance_##idx(struct device *dev)			       \
@@ -1229,7 +1291,7 @@ static const struct i2s_nrfx_config channel_cfg_##idx = {		       \
 	.instance_init = setup_instance_##idx,				       \
 };									       \
 									       \
-static struct i2s_nrfx_data channels_data_##idx = {			       \
+static volatile struct i2s_nrfx_data channels_data_##idx = {			       \
 	.state = I2S_IF_NOT_READY,					       \
 	.size = 0,							       \
 	.channel_tx = {							       \

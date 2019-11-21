@@ -15,7 +15,6 @@
 #include <i2s.h>
 
 
-
 #define I2S_DEV "I2S_0"
 
 
@@ -87,6 +86,8 @@ struct i2s_config i2sConfigRx = {
 	.timeout = TRANSFER_TIMEOUT_MS
 };
 #endif /*USE_RX*/
+extern volatile u32_t firstOne;
+extern volatile u32_t global_stat;
 
 void main(void)
 {
@@ -164,7 +165,17 @@ void main(void)
 #endif /*USE_RX && defined USE_TX*/
 		}
 #ifdef USE_TX
-		if (i == 10) {
+		if (i == 40) {
+			rx_running = false;
+			while (i2s_trigger(dev,
+					I2S_DIR_RX, I2S_TRIGGER_STOP) != 0) {
+				printk("t");
+
+			}
+			printk("RXS\n");
+			i = 1;
+		}
+		if (i == 10 && !tx_running) {
 			if (i2s_trigger(dev,
 					I2S_DIR_TX, I2S_TRIGGER_START) != 0) {
 				/*error occured -
@@ -232,7 +243,8 @@ void main(void)
 			read_res = i2s_read(dev, &my_rx_buf, &rcv_size);
 			if (read_res == 0) {
 				/*we can use received data (e.g. print it)*/
-				i2s_buf_t *rcv_data = (i2s_buf_t *)my_rx_buf;
+				static i2s_buf_t rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS];
+				memcpy(rcv_data, my_rx_buf, sizeof(rcv_data));
 
 				/*
 				 * Beware of high FRAME_CLOCK_FREQUENCY_HZ
@@ -240,13 +252,14 @@ void main(void)
 				 * it may cause TX underrun errors
 				 */
 				//printk("state: %u / %u ", i2s_state_get(dev, I2S_DIR_TX), i2s_state_get(dev, I2S_DIR_RX));
-				printk("%u, %p: %X %X %X %X %X %X %X %X\n",
-						 rcv_size, rcv_data,
+				/*printk("%u, %p (%x): %X %X %X %X %X %X %X %X\n",
+						 rcv_size, rcv_data, global_stat,
 						 rcv_data[0], rcv_data[1],
 						 rcv_data[2], rcv_data[3],
-						 rcv_data[4], rcv_data[5],
-						 rcv_data[6], rcv_data[7]
-							       );
+						 rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS - 4], rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS - 3],
+						 rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS - 2], rcv_data[NB_OF_SAMPLES * NB_OF_CHANNELS - 1]
+							       );*/
+				printk("%x ",rcv_data[0]);
 #ifdef CHECK_DATA
 				if (last_value != 0) {
 					i2s_buf_t val = last_value;
