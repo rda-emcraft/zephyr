@@ -11,6 +11,7 @@
 #include <zephyr.h>
 #include <misc/printk.h>
 #include <nrfx.h>
+#include <string.h>
 #include <device.h>
 #include <i2s.h>
 
@@ -283,7 +284,8 @@ void main(void)
 			}
 		}
 #endif /*USE_RX*/
-#ifdef STOP_AFTER	if (i == 100) {
+#ifdef STOP_AFTER
+			if (i == 100) {
 #ifdef USE_TX
 			{
 				struct i2s_config cfg = {
