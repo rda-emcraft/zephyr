@@ -18,7 +18,7 @@
 LOG_MODULE_REGISTER(i2s_nrfx, CONFIG_I2S_LOG_LEVEL);
 
 
-#define LOG_ERROR(msg, ch_state) LOG_ERR("[Ch status: %u]%s", ch_state, msg)
+#define LOG_ERROR(msg, ch_state) LOG_ERR("[Ch state: %u]%s", ch_state, msg)
 
 #define DEV_CFG(dev) \
 	(const struct i2s_nrfx_config *const)((dev)->config->config_info)
@@ -200,6 +200,9 @@ static int interface_set_state(struct i2s_nrfx_data *i2s,
 			change_forbidden = true;
 		}
 		break;
+	case I2S_IF_NOT_READY:
+		nrfx_i2s_uninit();
+		break;
 	case I2S_IF_ERROR:
 		break;
 	default:
@@ -292,6 +295,8 @@ static int interface_start(struct i2s_nrfx_data *i2s)
  *  - 'status - bit field, at the moment:
  *      if NRFX_I2S_STATUS_NEXT_BUFFERS_NEEDED (1) is set: driver needs new
  *              buffers ('EVENT_TXPTRUPD' or 'EVENT_RXPTRUPD' is active)
+ *      if NRFX_I2S_STATUS_TRANSFER_STOPPED (2) is set: driver has finished
+ *              transmission ('EVENT_STOPPED' is active)
  */
 static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 				    u32_t status)
@@ -363,7 +368,7 @@ static void interface_handler(nrfx_i2s_buffers_t const *p_released,
 			}
 		}
 	}
-	/* if nrfx driver sets NRFX_I2S_STATUS_TRANSFER_STOPPED flag and the
+	/* if nrfx driver sets 'NRFX_I2S_STATUS_TRANSFER_STOPPED' flag and the
 	 * interface state is 'I2S_IF_RESTARTING' it means that last transfer
 	 * before restart occurred. The peripheral will be stopped and started
 	 * again (the reason could be e.g. start rx while tx works)
@@ -611,7 +616,6 @@ static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 			  (u32_t)channel->current_state);
 		return -EIO;
 	}
-
 	if (i2s_cfg->frame_clk_freq == 0) {
 		/*reinit mode - cleaning channel data*/
 		channel_mem_clear(i2s, dir);
@@ -635,17 +639,20 @@ static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 			LOG_ERR("Config: Incompatible channel settings");
 			return -EINVAL;
 		}
+	} else {
+		/* Single channel reinitialisation
+		 * When reintialisation with two channels is needed it is
+		 * necessary to deinit at least one of them (call this function
+		 * with 'frame_clk_freq' set to 0)
+		 */
+		channel_change_state(channel, I2S_STATE_NOT_READY);
+		ret = interface_set_state(i2s, I2S_IF_NOT_READY);
+		if (ret < 0) {
+			channel_change_state(channel, I2S_STATE_ERROR);
+			return -EIO;
+		}
 	}
 
-	ret = channel_change_state(channel, I2S_STATE_READY);
-	if (ret < 0) {
-		channel_change_state(channel, I2S_STATE_ERROR);
-		return ret;
-	}
-#warning sprawdzic ponizszy przypadek:
-	/*
-	 * And what if only one channel is used and it is already configured (interface is READY), but you want to change its configuration?
-	 */
 	if (interface_get_state(i2s) == I2S_IF_NOT_READY) {
 		/* peripheral configuration and driver initialization is needed
 		 * only when interface is not configured (I2S_IF_NOT_READY)
@@ -671,6 +678,11 @@ static int i2s_nrfx_api_configure(struct device *dev, enum i2s_dir dir,
 			channel_change_state(channel, I2S_STATE_ERROR);
 			return -EIO;
 		}
+	}
+	ret = channel_change_state(channel, I2S_STATE_READY);
+	if (ret < 0) {
+		channel_change_state(channel, I2S_STATE_ERROR);
+		return ret;
 	}
 
 	/*store configuration*/

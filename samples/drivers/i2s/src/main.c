@@ -96,8 +96,8 @@ void main(void)
 	int ret = -1;
 
 	printk("[I2S]Starting example.\n\n[I2S]Configuration(%s/%s):\n",
-			i2sConfigTx.options == 0 ? "MASTER" : "SLAVE",
-			i2sConfigRx.options == 0 ? "MASTER" : "SLAVE");
+			i2sConfigTx.options & I2S_OPT_BIT_CLK_MASTER == 0 ? "MASTER" : "SLAVE",
+			i2sConfigRx.options & I2S_OPT_BIT_CLK_MASTER == 0 ? "MASTER" : "SLAVE");
 	dev = device_get_binding(I2S_DEV);
 	if (dev == NULL) {
 		printk("[I2S]Driver not found\n");
@@ -134,7 +134,7 @@ void main(void)
 #ifdef USE_TX
 
 			{
-				i2sConfigTx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
+				i2sConfigTx.frame_clk_freq = 22100;
 				ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
 				if (ret != 0) {
 					printk("[I2S]TX:Configuration failed\n");
@@ -144,12 +144,36 @@ void main(void)
 				printk("[I2S]TX Timeout:%u[ms]\n", i2sConfigTx.timeout);
 				printk("[I2S]TX Word size:%u[bits]\n", i2sConfigTx.word_size);
 			}
+			//i2sConfigTx.frame_clk_freq = 0;
+			//ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
+			//if (ret) {printk("!"); while(1);}
+			i2sConfigTx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
+			ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
+			if (ret) {printk("!?"); while(1);}
 	#else
 			printk("[I2S]TX:DISABLED\n");
 #endif
 
 #ifdef USE_RX
 			i2sConfigRx.frame_clk_freq = FRAME_CLOCK_FREQUENCY_HZ;
+			ret = i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx);
+			if (ret != 0) {
+				printk("[I2S]RX:Configuration failed\n");
+				return;
+			}
+			i2sConfigRx.frame_clk_freq = 0;
+			ret = i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx);
+			if (ret != 0) {
+				printk("[I2S]RX:Configuration failed\n");
+				return;
+			}
+			i2sConfigTx.frame_clk_freq = 22100;
+			ret = i2s_configure(dev, I2S_DIR_TX, &i2sConfigTx);
+			if (ret != 0) {
+				printk("[I2S]TX:Configuration failed\n");
+				return;
+			}
+			i2sConfigRx.frame_clk_freq = 22100;
 			ret = i2s_configure(dev, I2S_DIR_RX, &i2sConfigRx);
 			if (ret != 0) {
 				printk("[I2S]RX:Configuration failed\n");
@@ -208,7 +232,7 @@ void main(void)
 					/*error occured -
 					 * refer to I2S API zephyr description
 					 */
-					printk("[I2S]i2s_write() returned error\n");
+					printk("[I2S]i2s_write() returned error code %d\n", write_res);
 					return;
 				}
 			} else {
