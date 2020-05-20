@@ -7,6 +7,10 @@
 
 #include <soc.h>
 #include <drivers/clock_control.h>
+#if IS_ENABLED(CONFIG_HALTIUM_LOCAL_DOMAIN)
+#include <drivers/sysctrl/nrf_local_domain.h>
+#include <string.h>
+#endif
 #include <drivers/clock_control/nrf_clock_control.h>
 #include <drivers/timer/system_timer.h>
 #include <sys_clock.h>
@@ -211,10 +215,19 @@ int z_clock_driver_init(struct device *device)
 
 	return 0;
 }
-
+//extern nrf_sysctl_msg_t *get_sysctrl_instance(void);
 void z_clock_set_timeout(s32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);
+
+#if 0//IS_ENABLED(CONFIG_HALTIUM_LOCAL_DOMAIN)
+	nrf_sysctl_msg_t *message = get_sysctrl_instance();
+	message->id = SYSTEM_CLOCK_SET_TIMEOUT;
+	message->data_size = sizeof(ticks);
+
+	memcpy(message->data, &ticks, message->data_size);
+        z_nrf_sysctl_send_msg(message);
+#else
 	u32_t cyc;
 
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
@@ -250,7 +263,9 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 	}
 
 	cyc += last_count;
+
 	set_protected_absolute_ticks(cyc);
+#endif
 }
 
 u32_t z_clock_elapsed(void)
