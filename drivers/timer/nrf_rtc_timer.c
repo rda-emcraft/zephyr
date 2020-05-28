@@ -7,8 +7,8 @@
 
 #include <soc.h>
 #include <drivers/clock_control.h>
-#if IS_ENABLED(CONFIG_HALTIUM_LOCAL_DOMAIN)
-#include <drivers/sysctrl/nrf_local_domain.h>
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+#include <drivers/sysctl/nrf_sysctl.h>
 #include <string.h>
 #endif
 #include <drivers/clock_control/nrf_clock_control.h>
@@ -135,7 +135,6 @@ static void set_absolute_ticks(u32_t abs_val)
 		/* Already expired. set for next tick */
 		/* It is possible that setting CC was interrupted and CC might
 		 * be set to COUNTER+1 value which will not generate an event.
-		 * In that case, special handling is performed (attempt to set
 		 * CC to COUNTER+2).
 		 */
 		handle_next_tick_case(t);
@@ -215,18 +214,31 @@ int z_clock_driver_init(struct device *device)
 
 	return 0;
 }
-//extern nrf_sysctl_msg_t *get_sysctrl_instance(void);
+
+int z_clock_postinit(void)
+{
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+	return z_nrf_sysctl_init();
+#endif
+}
+
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+//static nrf_sysctl_msg_t message;
+#endif
+//extern void (*xxxxxxx_func)(void);
+
 void z_clock_set_timeout(s32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);
 
-#if 0//IS_ENABLED(CONFIG_HALTIUM_LOCAL_DOMAIN)
-	nrf_sysctl_msg_t *message = get_sysctrl_instance();
-	message->id = SYSTEM_CLOCK_SET_TIMEOUT;
-	message->data_size = sizeof(ticks);
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
 
-	memcpy(message->data, &ticks, message->data_size);
-        z_nrf_sysctl_send_msg(message);
+	//message.id = SYSTEM_CLOCK_SET_TIMEOUT;
+	//message.data_size = sizeof(ticks);
+
+	//memcpy(message.data, &ticks, message.data_size);
+	//z_nrf_sysctl_send_request1();
+	//z_nrf_sysctl_send_request1(&message);
 #else
 	u32_t cyc;
 

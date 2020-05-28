@@ -69,8 +69,8 @@ config HAS_NRFX
 menu "nrfx drivers"
 	depends on HAS_NRFX
 
-config SYSCTRL_NRF
-	bool "sysctrl"
+config NRF_SYSCTL
+	bool "Enable System Controller"
 	
 config NRFX_ADC
 	bool "Enable ADC driver"

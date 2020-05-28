@@ -1,0 +1,51 @@
+# PWM configuration options
+
+# Copyright (c) 2015 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig SYSCTL
+	bool "SYSCTL Drivers"
+	default n
+	help
+	  Enable config options for SYSCTL drivers.
+
+if SYSCTL
+
+module = SYSCTL
+module-str = sysctl
+source "subsys/logging/Kconfig.template.log_config"
+
+source "drivers/sysctl/Kconfig.nrfx"
+#temp
+choice
+        prompt "RPMSG device role"
+        default RPMSG_REMOTE
+
+config IPM_NRFX_IPC
+        bool "IPMNRFX"
+
+config TASKS_SEND_0_IPC_CHANNEL_0
+        bool "ts0ic0"
+
+config EVENTS_RECEIVE_0_IPC_CHANNEL_1
+        bool "er0ic1"
+
+config TASKS_SEND_0_IPC_CHANNEL_1
+        bool "ts0ic1"
+
+config EVENTS_RECEIVE_0_IPC_CHANNEL_0
+        bool "er0ic0"
+
+config CALLBACK_ON_EVENT_RECEIVE_0
+        bool "coer0"
+
+config RPMSG_REMOTE
+        bool "Remote"
+
+config RPMSG_MASTER
+        bool "Master"
+
+endchoice
+
+
+endif # SYSCTL

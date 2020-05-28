@@ -126,6 +126,8 @@ extern void z_clock_announce(s32_t ticks);
  */
 extern u32_t z_clock_elapsed(void);
 
+extern int z_clock_postinit(void);
+
 #ifdef __cplusplus
 }
 #endif

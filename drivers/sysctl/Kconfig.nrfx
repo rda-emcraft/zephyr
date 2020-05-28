@@ -1,0 +1,32 @@
+# System controller driver configuration options
+
+# Copyright (c) 2020 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+
+menuconfig NRF_SYSCTL
+	bool "nRF system controller enable"
+	default y
+	depends on SOC_FAMILY_NRF
+	help
+	  Enable System Controller feature.
+
+if NRF_SYSCTL
+
+choice
+        prompt "Device type"
+        default NRF_SYSCTL_LOCAL_DOMAIN
+
+config NRF_SYSCTL_LOCAL_DOMAIN
+        bool "Local Domain"
+
+config NRF_SYSCTL_SYSTEM_CONTROLLER
+        bool "System Controller"
+
+endchoice
+
+config NRF_MSG_DATA_SIZE
+	int "Data field size"
+	default 64
+
+endif # NRF_SYSCTL
