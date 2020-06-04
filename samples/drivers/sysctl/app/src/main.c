@@ -36,7 +36,7 @@ void dispatcher(void)
     /* Test initialization */
     //k_sem_init(&test_sem, 0, 10);
    // k_sem_take(&test_sem, K_MSEC(2000));
-    nrf_sysctl_init(&test_sem);
+    //nrf_sysctl_init(&test_sem);
 
     while(1)
     {

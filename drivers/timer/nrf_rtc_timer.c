@@ -219,7 +219,7 @@ int z_clock_driver_init(struct device *device)
 //static nrf_sysctl_msg_t message;
 #endif
 //extern void (*xxxxxxx_func)(void);
-
+extern void local_domain_kick_to_send(void);
 void z_clock_set_timeout(s32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);

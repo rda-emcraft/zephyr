@@ -22,26 +22,20 @@ LOG_MODULE_REGISTER(sysctl);
 static struct k_sem test_sem;
 static struct k_sem ipc_kick;
 
-static volatile bool sync = false;
+int nrf_sysctl_init(struct k_sem *ipc_kick);
+void z_nrf_sysctl_send_request1(void);
+static volatile uint32_t sync = false;
 
 void ipc(void)
 {
 
-	__ASSERT_MSG_INFO("IPC thread %u",CONFIG_POLL);
+	//__ASSERT_MSG_INFO("IPC thread %u",CONFIG_POLL);
+	k_sem_init(&ipc_kick, 0, 1);
 	nrf_sysctl_init(&ipc_kick);
 
-	k_sem_init(&ipc_kick, 0, 1);
-	k_tid_t thr = k_current_get();
-	while (1)
-	{
-		__ASSERT_MSG_INFO("kick? %p %p", thr, &ipc_kick);
-		sync = true;
-		for (uint32_t i = 20000000; i > 0; i--) arch_nop();
-		z_nrf_sysctl_send_request1();
-		while(1);
-		//k_sem_take(&ipc_kick, K_FOREVER);
 
-	}
+	//k_tid_t thr = k_current_get();
+
 
 }
 
@@ -55,7 +49,13 @@ void main_thread(void)
 #endif
 
     /* Test initialization */
-    while (!sync) k_yield();
+    sync = 300000;
+    while (sync) {
+	    sync --;
+
+	    k_yield();
+    }
+    __ASSERT_MSG_INFO("synced", sync);
     k_sem_init(&test_sem, 0, 10);
     k_tid_t thr = k_current_get();
     //k_sem_take(&test_sem, K_MSEC(1000));
@@ -65,7 +65,9 @@ void main_thread(void)
 	for (uint32_t i = 20000000; i > 0; i--) arch_nop();
 	__ASSERT_MSG_INFO("taking semaphore %p", thr);
 	//k_sem_take(&test_sem, K_MSEC(1000));
-	k_sleep(K_MSEC(1000));
+	//k_sleep(K_MSEC(1000));
+	k_sem_give(&ipc_kick);
+	k_sleep(K_FOREVER);
     }
 }
 

@@ -128,7 +128,7 @@ static void virtio_set_features(struct virtio_device *vdev, u32_t features)
 
 static void virtio_notify(struct virtqueue *vq)
 {
-	LOG_INF("Sending notify");
+	__ASSERT_MSG_INFO("Sending notify");
 	int status = ipm_send(ipm_tx_handle, 0, 0, NULL, 0);
 	if (status != 0)
 	{
@@ -149,7 +149,7 @@ const struct virtio_dispatch dispatch =
 
 static void ipm_callback(void *context, u32_t id, volatile void *data)
 {
-	//LOG_INF("Got callback of id %u / %p, %p", id, vq[0], vq[1]);
+	__ASSERT_MSG_INFO("Got callback of id %u / %p, %p", id, vq[0], vq[1]);
 	k_sem_give(&ipc_sem);
 }
 
@@ -158,117 +158,6 @@ nrf_sysctl_msg_t *z_nrf_sysctl_decode_request(void * data)
 	return (nrf_sysctl_msg_t*) data;
 }
 
-#if IS_ENABLED(CONFIG_NRF_SYSCTL_SYSTEM_CONTROLLER)
-#define CONFIG_MSG_QUEUE_SIZE 16
-static struct
-{
-	nrf_sysctl_msg_t ring_buf[CONFIG_MSG_QUEUE_SIZE];
-	nrf_sysctl_msg_t *sorted_list[CONFIG_MSG_QUEUE_SIZE];
-	u8_t sorted_list_end;
-} queue;
-#define RING_BUF_INC(idx, limit) {idx = (++idx <= limit) ? idx : 0; }
-
-static bool add_to_sorted_list(nrf_sysctl_msg_t * const msg)
-{
-	u8_t store_idx = queue.sorted_list_end; //index indicates where the new entry will be stored
-	for (u8_t i = 0; i < queue.sorted_list_end; i ++)
-	{
-		if (queue.sorted_list[i] == NULL)
-		{
-			return false;
-		}
-		if (msg->timestamp < queue.sorted_list[i]->timestamp)
-		{
-			store_idx = i;
-			for (u8_t j = queue.sorted_list_end; j > store_idx; j --)
-			{
-				queue.sorted_list[j] = queue.sorted_list[j - 1];
-			}
-			break;
-
-		}
-	}
-	queue.sorted_list[store_idx] = msg;
-	queue.sorted_list_end ++;
-	return true;
-}
-
-static bool remove_from_sorted_list(nrf_sysctl_msg_t * msg)
-{
-	bool found = false;
-	for (u8_t i = 0; i < queue.sorted_list_end; i ++)
-	{
-		if (found)
-		{
-			queue.sorted_list[i - 1] = queue.sorted_list[i];
-		}
-		if (queue.sorted_list[i] == msg)
-		{
-			found = true;
-		}
-
-	}
-	queue.sorted_list_end --;
-	return true;
-}
-
-static nrf_sysctl_msg_t * find_free_entry(void)
-{
-	for (u8_t i = 0; i < CONFIG_MSG_QUEUE_SIZE; i ++)
-	{
-		if (queue.ring_buf[i].id == 0)
-		{
-			return &queue.ring_buf[i];
-		}
-	}
-	return NULL;
-}
-
-static bool queue_add(const nrf_sysctl_msg_t * const msg)
-{
-	__ASSERT(msg != NULL && msg->id != 0, "Invalid object");
-	nrf_sysctl_msg_t *free_entry = find_free_entry();
-	if (free_entry == NULL)
-	{
-		return false;
-	}
-	memcpy(free_entry, msg, sizeof(nrf_sysctl_msg_t));
-	LOG_INF("Add: %hu", msg->id);
-	return add_to_sorted_list(free_entry);
-}
-
-static nrf_sysctl_msg_t * queue_get_nearest(void)
-{
-	return queue.sorted_list[0];
-}
-
-static void queue_clear(void)
-{
-	memset(&queue, 0, sizeof(queue));
-}
-
-static nrf_sysctl_msg_id_t queue_remove_first(void)
-{
-	nrf_sysctl_msg_id_t id = queue.sorted_list[0]->id;
-	queue.sorted_list[0]->id = 0;
-	remove_from_sorted_list(queue.sorted_list[0]);
-}
-
-static void log_queue(void)
-{
-	k_sleep(K_MSEC(100));
-	LOG_INF("Queue:");
-	k_sleep(K_MSEC(1000));
-	for (u8_t i = 0; i < queue.sorted_list_end; i ++)
-	{
-		LOG_INF("%hu. %u(%08x)", i, queue.sorted_list[i]->id, queue.sorted_list[i]->timestamp);
-		k_sleep(K_MSEC(1000));
-	}
-}
-
-
-#endif
-
 int endpoint_cb(struct rpmsg_endpoint * ept,
             void *                  data,
             size_t                  len,
@@ -276,12 +165,11 @@ int endpoint_cb(struct rpmsg_endpoint * ept,
             void *                  priv)
 {
 	nrf_sysctl_msg_t *rcv_msg = z_nrf_sysctl_decode_request(data);
-	LOG_INF("Received id:%u, size: %hu, timestamp: %x",
+	__ASSERT_MSG_INFO("Received id:%u, size: %hu",
 			rcv_msg->id,
-			rcv_msg->data_size,
-			(u64_t)rcv_msg->timestamp);
+			rcv_msg->data_size);
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_SYSTEM_CONTROLLER)
-	rpmsg_send(ept, SYSCTL_ACK, sizeof(SYSCTL_ACK));
+	//rpmsg_send(ept, SYSCTL_ACK, sizeof(SYSCTL_ACK));
 	//queue_add(rcv_msg);
 #endif
 	return RPMSG_SUCCESS;
@@ -318,10 +206,13 @@ nrf_sysctl_msg_t m = {
 	.timestamp = 0,
 };
 
+int z_nrf_sysctl_send_request(nrf_sysctl_msg_t *msg);
+
 void z_nrf_sysctl_send_request1(void)
 {
-	__ASSERT_MSG_INFO("sending");
-	rpmsg_send(&ep, (void*)&m , sizeof(nrf_sysctl_msg_t));
+
+	z_nrf_sysctl_send_request(&m);
+	//rpmsg_send(&ep, (void*)&m , sizeof(nrf_sysctl_msg_t));
 }
 
 int z_nrf_sysctl_send_request(nrf_sysctl_msg_t *msg)
@@ -331,23 +222,25 @@ int z_nrf_sysctl_send_request(nrf_sysctl_msg_t *msg)
        // send_receive(p_test_ctx);
 	//return msg->send(msg, NULL, NULL, NULL);
 	//LOG_INF("requesting");
-	msg->timestamp =
+	__ASSERT_MSG_INFO("sending size %u", msg->data_size);
 	rpmsg_send(&ep, (void*)msg , sizeof(nrf_sysctl_msg_t));
 	return NRF_SUCCESS;
 }
 
+
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
 static struct k_sem *ipc_kick_send_to_sysctrl;
-extern inline struct k_spinlock * z_impl_k_sem_get_lock(void);
+//extern inline struct k_spinlock * z_impl_k_sem_get_lock(void);
 
 void local_domain_kick_to_send(void)
 {
 
-	struct k_spinlock *sem_lock = z_impl_k_sem_get_lock();
+	//struct k_spinlock *sem_lock = z_impl_k_sem_get_lock();
 	//k_spin_release(sem_lock);
 	//k_yield();
 	__ASSERT_MSG_INFO("G %p", ipc_kick_send_to_sysctrl);
 	//k_sem_give(ipc_kick_send_to_sysctrl);
+	ipc_kick_send_to_sysctrl->count += (ipc_kick_send_to_sysctrl->count != ipc_kick_send_to_sysctrl->limit) ? 1U : 0U;
 	z_handle_obj_poll_events(&ipc_kick_send_to_sysctrl->poll_events, K_POLL_STATE_SEM_AVAILABLE);
 	__ASSERT_MSG_INFO("N");
 	//k_spin_lock(sem_lock);
@@ -357,7 +250,7 @@ void local_domain_kick_to_send(void)
 #endif
 
 
-static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
+int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 {
 	k_sem_init(&ipc_sem, 0, 1);
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
@@ -472,7 +365,7 @@ static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 	    vdev.vrings_num = VRING_COUNT;
 	    vdev.func = &dispatch;
 	    vdev.vrings_info = &rvrings[0];
-	    LOG_INF("CB1=%p %p", vq[0]->callback, vq[1]->callback);
+	    __ASSERT_MSG_INFO("CB1=%p %p", vq[0]->callback, vq[1]->callback);
 #if IS_ENABLED(CONFIG_RPMSG_MASTER)
 	    rpmsg_virtio_init_shm_pool(&shpool, (void *)SHM_START_ADDR, SHM_SIZE);
 	    status = rpmsg_init_vdev(&rvdev, &vdev, ns_bind_cb, io, &shpool);
@@ -502,12 +395,11 @@ static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 	     * from NS setup and than we need to process it
 	     */
 	    __ASSERT_MSG_INFO("Waiting for remote endpoint to appear...");
-//	    virtqueue_notification(vq[0]);
+	    virtqueue_notification(vq[0]);
 #endif
 
 #if IS_ENABLED(CONFIG_RPMSG_MASTER)
 	    /* Wait till nameservice ep is setup */
-#warning semaphore
 #if DO_NOT_USE_SEMAPHORE
 	    while (!cb_done)
 	    {
@@ -526,7 +418,7 @@ static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 #else
 	    rdev = rpmsg_virtio_get_rpmsg_device(&rvdev);
 
-	    LOG_INF("Creating endpoint named: %s", ENDPOINT_NAME);
+	    __ASSERT_MSG_INFO("Creating endpoint named: %s", ENDPOINT_NAME);
 	    status = rpmsg_create_ept(&ep,
 	                              rdev,
 	                              ENDPOINT_NAME,
@@ -536,7 +428,7 @@ static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 	                              rpmsg_service_unbind);
 	    if (status != 0)
 	    {
-	        LOG_ERR("rpmsg_create_ept failed %d", status);
+		__ASSERT_MSG_INFO("rpmsg_create_ept failed %d", status);
 	        return;
 	    }
 
@@ -546,23 +438,26 @@ static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 #endif
 static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
-#if 0
-	    nrf_sysctl_msg_t my_msg = {
-		.id = SYSTEM_CLOCK_SET_TIMEOUT,
-		.data_size = sizeof(s32_t),
-		//.data = LOC_REQ,
-	    };
+#if 1
+	nrf_sysctl_msg_t m_to_send = {
+		.id = 15,
+		.type = SYSTEM_CLOCK_SET_TIMEOUT,
+		.timestamp = 100,
+		.data_size = 8,
+	};
+	while (1)
+	{
+		__ASSERT_MSG_INFO("kick?");
+		//sync = true;
 
-	    u32_t i = 0;
-	    while (my_msg.id < ARRAY_SIZE(ticks))
-	    {
-		//k_sleep(K_MSEC(1000));
-		for (uint32_t i = 20000000; i > 0; i--) arch_nop();
-	        //LOG_INF("Sending message: %u", my_msg.id);
-		my_msg.timestamp = (u64_t)ticks[my_msg.id];
-	        z_nrf_sysctl_send_request(&my_msg);
-	        my_msg.id ++;
-	    }
+
+		k_sem_take(ipc_kick_send_to_sysctrl, K_FOREVER);
+		z_nrf_sysctl_send_request(&m_to_send);
+		__ASSERT_MSG_INFO("sent");
+		k_sem_take(&ipc_sem, K_FOREVER);
+		__ASSERT_MSG_INFO("afterkick %u/%u", ipc_kick_send_to_sysctrl->count, ipc_kick_send_to_sysctrl->limit);
+
+	}
 #endif
 #elif IS_ENABLED(CONFIG_NRF_SYSCTL_SYSTEM_CONTROLLER)
 #if 1
@@ -570,30 +465,17 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 	    while (1)
 	    {
 
-		    __ASSERT_MSG_INFO("Waiting for message from Local Domain");
+		__ASSERT_MSG_INFO("Waiting for message from Local Domain");
 		k_sem_take(&ipc_sem, K_FOREVER);
-		__ASSERT_MSG_INFO("OK");
-#if IS_ENABLED(CONFIG_RPMSG_REMOTE)
-		if (cnt == ARRAY_SIZE(ticks) - 2)
-		{
-			log_queue();
-			nrf_sysctl_msg_id_t id;
-			for (uint8_t i = 0; i < 5; i++)
-			{
-				id = queue_remove_first();
-			}
-			log_queue();
-		}
-
-		virtqueue_notification(vq[1]);
-		cnt ++;
+		LOG_INF("OK");
+		k_sleep(K_MSEC(7000));
+		z_nrf_sysctl_send_request1();
 #elif IS_ENABLED(CONFIG_RPMSG_MASTER)
 		virtqueue_notification(vq[0]);
 #endif
 		//k_sleep(K_MSEC(100));
 
 	    }
-#endif
 #endif //1
 	    return NRF_SUCCESS;
 }
