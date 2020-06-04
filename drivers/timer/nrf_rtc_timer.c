@@ -179,7 +179,7 @@ void rtc1_nrf_isr(void *arg)
 		 */
 		set_absolute_ticks(last_count + CYC_PER_TICK);
 	}
-
+	__ASSERT_MSG_INFO("ano");
 	z_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : (dticks > 0));
 }
 
@@ -215,13 +215,6 @@ int z_clock_driver_init(struct device *device)
 	return 0;
 }
 
-int z_clock_postinit(void)
-{
-#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
-	return z_nrf_sysctl_init();
-#endif
-}
-
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
 //static nrf_sysctl_msg_t message;
 #endif
@@ -230,15 +223,16 @@ int z_clock_postinit(void)
 void z_clock_set_timeout(s32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);
+	__ASSERT_MSG_INFO("set %d", ticks);
 
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
-
 	//message.id = SYSTEM_CLOCK_SET_TIMEOUT;
 	//message.data_size = sizeof(ticks);
-
+	local_domain_kick_to_send();
 	//memcpy(message.data, &ticks, message.data_size);
 	//z_nrf_sysctl_send_request1();
 	//z_nrf_sysctl_send_request1(&message);
+
 #else
 	u32_t cyc;
 
@@ -282,22 +276,29 @@ void z_clock_set_timeout(s32_t ticks, bool idle)
 
 u32_t z_clock_elapsed(void)
 {
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+	return 0;
+#else
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		return 0;
 	}
 
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	u32_t ret = counter_sub(counter(), last_count) / CYC_PER_TICK;
-
 	k_spin_unlock(&lock, key);
 	return ret;
+#endif
 }
 
 u32_t z_timer_cycle_get_32(void)
 {
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+	return 0;
+#else
 	k_spinlock_key_t key = k_spin_lock(&lock);
 	u32_t ret = counter_sub(counter(), last_count) + last_count;
-
+	__ASSERT_MSG_INFO("cyc");
 	k_spin_unlock(&lock, key);
 	return ret;
+#endif
 }

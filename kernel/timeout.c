@@ -86,6 +86,7 @@ static s32_t next_timeout(void)
 void z_add_timeout(struct _timeout *to, _timeout_func_t fn,
 		   k_timeout_t timeout)
 {
+	__ASSERT_MSG_INFO("A %p", timeout_list);
 	if (K_TIMEOUT_EQ(timeout, K_FOREVER)) {
 		return;
 	}

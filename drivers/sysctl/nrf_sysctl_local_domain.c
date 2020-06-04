@@ -281,8 +281,8 @@ int endpoint_cb(struct rpmsg_endpoint * ept,
 			rcv_msg->data_size,
 			(u64_t)rcv_msg->timestamp);
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_SYSTEM_CONTROLLER)
-	//rpmsg_send(ept, SYSCTL_ACK, sizeof(SYSCTL_ACK));
-	queue_add(rcv_msg);
+	rpmsg_send(ept, SYSCTL_ACK, sizeof(SYSCTL_ACK));
+	//queue_add(rcv_msg);
 #endif
 	return RPMSG_SUCCESS;
 }
@@ -295,7 +295,7 @@ static void rpmsg_service_unbind(struct rpmsg_endpoint * ep)
 #if IS_ENABLED(CONFIG_RPMSG_MASTER)
 void ns_bind_cb(struct rpmsg_device * rdev, const char * name, u32_t dest)
 {
-//LOG_INF("Remote endpoint appeared: %s", log_strdup(name));
+__ASSERT_MSG_INFO("Remote endpoint appeared:");
 
 (void)rpmsg_create_ept(&ep,
                        rdev,
@@ -320,9 +320,8 @@ nrf_sysctl_msg_t m = {
 
 void z_nrf_sysctl_send_request1(void)
 {
-	//LOG_INF("requesting");
+	__ASSERT_MSG_INFO("sending");
 	rpmsg_send(&ep, (void*)&m , sizeof(nrf_sysctl_msg_t));
-
 }
 
 int z_nrf_sysctl_send_request(nrf_sysctl_msg_t *msg)
@@ -337,13 +336,33 @@ int z_nrf_sysctl_send_request(nrf_sysctl_msg_t *msg)
 	return NRF_SUCCESS;
 }
 
-static int z_nrf_sysctl_init()
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+static struct k_sem *ipc_kick_send_to_sysctrl;
+extern inline struct k_spinlock * z_impl_k_sem_get_lock(void);
+
+void local_domain_kick_to_send(void)
 {
 
-	//k_sleep(K_MSEC(1000));
-	//LOG_INF("TEST_INIT");
+	struct k_spinlock *sem_lock = z_impl_k_sem_get_lock();
+	//k_spin_release(sem_lock);
+	//k_yield();
+	__ASSERT_MSG_INFO("G %p", ipc_kick_send_to_sysctrl);
+	//k_sem_give(ipc_kick_send_to_sysctrl);
+	z_handle_obj_poll_events(&ipc_kick_send_to_sysctrl->poll_events, K_POLL_STATE_SEM_AVAILABLE);
+	__ASSERT_MSG_INFO("N");
+	//k_spin_lock(sem_lock);
+
+
+}
+#endif
+
+
+static int z_nrf_sysctl_init(struct k_sem *ipc_kick)
+{
 	k_sem_init(&ipc_sem, 0, 1);
-	//k_sleep(K_MSEC(1000));
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+	ipc_kick_send_to_sysctrl = ipc_kick;
+#endif
 #if IS_ENABLED(CONFIG_RPMSG_MASTER)
 #if !DO_NOT_USE_SEMAPHORE
 	k_sem_init(&sync_sem, 0, 1);
@@ -482,7 +501,7 @@ static int z_nrf_sysctl_init()
 	    /* Since we are using name service, we need to wait for a response
 	     * from NS setup and than we need to process it
 	     */
-	    LOG_INF("Waiting for remote endpoint to appear...");
+	    __ASSERT_MSG_INFO("Waiting for remote endpoint to appear...");
 //	    virtqueue_notification(vq[0]);
 #endif
 
@@ -521,13 +540,13 @@ static int z_nrf_sysctl_init()
 	        return;
 	    }
 
-	    LOG_INF("Initialized and waiting for message...");
+	    __ASSERT_MSG_INFO("Initialized and waiting for message...");
 
 
 #endif
 static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 #if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
-#if 1
+#if 0
 	    nrf_sysctl_msg_t my_msg = {
 		.id = SYSTEM_CLOCK_SET_TIMEOUT,
 		.data_size = sizeof(s32_t),
@@ -551,8 +570,9 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 	    while (1)
 	    {
 
-		//LOG_INF("Waiting for message from Local Domain");
+		    __ASSERT_MSG_INFO("Waiting for message from Local Domain");
 		k_sem_take(&ipc_sem, K_FOREVER);
+		__ASSERT_MSG_INFO("OK");
 #if IS_ENABLED(CONFIG_RPMSG_REMOTE)
 		if (cnt == ARRAY_SIZE(ticks) - 2)
 		{
@@ -564,7 +584,6 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 			}
 			log_queue();
 		}
-
 
 		virtqueue_notification(vq[1]);
 		cnt ++;
@@ -578,7 +597,7 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 #endif //1
 	    return NRF_SUCCESS;
 }
-void nrf_sysctl_init(void)
+void nrf_sysctl_init(struct k_sem *ipc_kick)
 {
-	z_nrf_sysctl_init();
+	z_nrf_sysctl_init(ipc_kick);
 }

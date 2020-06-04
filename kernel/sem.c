@@ -60,6 +60,11 @@ SYS_INIT(init_sem_module, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
 
 #endif /* CONFIG_OBJECT_TRACING */
 
+inline struct k_spinlock * z_impl_k_sem_get_lock(void)
+{
+	return &lock;
+}
+
 int z_impl_k_sem_init(struct k_sem *sem, unsigned int initial_count,
 		      unsigned int limit)
 {

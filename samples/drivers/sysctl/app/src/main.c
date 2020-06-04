@@ -13,7 +13,7 @@
 #include <logging/log.h>
 
 LOG_MODULE_REGISTER(sysctl);
-
+static struct k_sem test_sem;
 /* size of stack area used by each thread */
 #define STACKSIZE 1024
 
@@ -34,7 +34,9 @@ void dispatcher(void)
 #endif
 
     /* Test initialization */
-    nrf_sysctl_init(rcv_msg_callback);
+    //k_sem_init(&test_sem, 0, 10);
+   // k_sem_take(&test_sem, K_MSEC(2000));
+    nrf_sysctl_init(&test_sem);
 
     while(1)
     {

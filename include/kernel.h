@@ -3704,6 +3704,7 @@ __syscall int k_sem_init(struct k_sem *sem, unsigned int initial_count,
  * @retval -EBUSY Returned without waiting.
  * @retval -EAGAIN Waiting period timed out.
  */
+__syscall struct k_spinlock * k_sem_get_lock(void);
 __syscall int k_sem_take(struct k_sem *sem, k_timeout_t timeout);
 
 /**
