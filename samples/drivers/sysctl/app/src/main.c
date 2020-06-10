@@ -36,11 +36,11 @@ void dispatcher(void)
     /* Test initialization */
     //k_sem_init(&test_sem, 0, 10);
    // k_sem_take(&test_sem, K_MSEC(2000));
-    //nrf_sysctl_init(&test_sem);
+    nrf_sysctl_init(&test_sem);
 
     while(1)
     {
-	k_sleep(K_MSEC(100));
+	k_sleep(K_MSEC(10000));
 	//z_nrf_sysctl_send_request1();
 	//LOG_INF("taking semaphore");
 	//k_sem_take(&test_sem, K_MSEC(1000));

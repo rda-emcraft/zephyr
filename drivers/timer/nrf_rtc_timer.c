@@ -179,12 +179,14 @@ void rtc1_nrf_isr(void *arg)
 		 */
 		set_absolute_ticks(last_count + CYC_PER_TICK);
 	}
-	__ASSERT_MSG_INFO("ano");
+	__ASSERT_MSG_INFO("ano %u", dticks);
 	z_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : (dticks > 0));
 }
 
 int z_clock_driver_init(struct device *device)
 {
+#if IS_ENABLED(CONFIG_NRF_SYSCTL_LOCAL_DOMAIN)
+#else
 	struct device *clock;
 
 	ARG_UNUSED(device);
@@ -211,7 +213,7 @@ int z_clock_driver_init(struct device *device)
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		set_comparator(counter() + CYC_PER_TICK);
 	}
-
+#endif
 	return 0;
 }
 

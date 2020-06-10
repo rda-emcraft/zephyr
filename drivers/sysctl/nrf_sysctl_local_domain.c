@@ -150,6 +150,9 @@ const struct virtio_dispatch dispatch =
 static void ipm_callback(void *context, u32_t id, volatile void *data)
 {
 	__ASSERT_MSG_INFO("Got callback of id %u / %p, %p", id, vq[0], vq[1]);
+	static uint32_t cb_cnt = 0;
+	cb_cnt ++;
+	if (cb_cnt == 2) z_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? 32768 : (false));//rtc1_nrf_isr(NULL);
 	k_sem_give(&ipc_sem);
 }
 
@@ -240,8 +243,8 @@ void local_domain_kick_to_send(void)
 	//k_yield();
 	__ASSERT_MSG_INFO("G %p", ipc_kick_send_to_sysctrl);
 	//k_sem_give(ipc_kick_send_to_sysctrl);
-	ipc_kick_send_to_sysctrl->count += (ipc_kick_send_to_sysctrl->count != ipc_kick_send_to_sysctrl->limit) ? 1U : 0U;
-	z_handle_obj_poll_events(&ipc_kick_send_to_sysctrl->poll_events, K_POLL_STATE_SEM_AVAILABLE);
+	//ipc_kick_send_to_sysctrl->count += (ipc_kick_send_to_sysctrl->count != ipc_kick_send_to_sysctrl->limit) ? 1U : 0U;
+	//z_handle_obj_poll_events(&ipc_kick_send_to_sysctrl->poll_events, K_POLL_STATE_SEM_AVAILABLE);
 	__ASSERT_MSG_INFO("N");
 	//k_spin_lock(sem_lock);
 
@@ -395,7 +398,7 @@ int z_nrf_sysctl_init(struct k_sem *ipc_kick)
 	     * from NS setup and than we need to process it
 	     */
 	    __ASSERT_MSG_INFO("Waiting for remote endpoint to appear...");
-	    virtqueue_notification(vq[0]);
+	    //virtqueue_notification(vq[0]);
 #endif
 
 #if IS_ENABLED(CONFIG_RPMSG_MASTER)
@@ -452,9 +455,12 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 
 
 		k_sem_take(ipc_kick_send_to_sysctrl, K_FOREVER);
+		virtqueue_notification(vq[1]);
 		z_nrf_sysctl_send_request(&m_to_send);
+		k_sleep(K_MSEC(100));
 		__ASSERT_MSG_INFO("sent");
-		k_sem_take(&ipc_sem, K_FOREVER);
+		//k_sem_take(&ipc_sem, K_FOREVER);
+
 		__ASSERT_MSG_INFO("afterkick %u/%u", ipc_kick_send_to_sysctrl->count, ipc_kick_send_to_sysctrl->limit);
 
 	}
@@ -469,6 +475,7 @@ static s32_t ticks[] = {1,5,3,7,8,9,2,3,1,67,43,32,5,567,4,3,2,4,5,6,3,2};
 		k_sem_take(&ipc_sem, K_FOREVER);
 		LOG_INF("OK");
 		k_sleep(K_MSEC(7000));
+		virtqueue_notification(vq[1]);
 		z_nrf_sysctl_send_request1();
 #elif IS_ENABLED(CONFIG_RPMSG_MASTER)
 		virtqueue_notification(vq[0]);
