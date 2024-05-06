@@ -7,6 +7,11 @@ zephyr_linker_sources_ifdef(CONFIG_ARM SECTIONS arm_platform_init.ld)
 
 zephyr_library_sources_ifdef(CONFIG_POWEROFF poweroff.c)
 
+if(CONFIG_SOC_SERIES_NRF54HX)
+  zephyr_sources_ifdef(CONFIG_POWEROFF power.c)
+  zephyr_sources_ifdef(CONFIG_PM_S2RAM pm_s2ram.c)
+endif()
+
 zephyr_include_directories(.)
 
 if(CONFIG_TFM_PARTITION_PLATFORM)

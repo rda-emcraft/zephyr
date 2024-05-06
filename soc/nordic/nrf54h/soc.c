@@ -13,7 +13,37 @@
 #include <hal/nrf_hsfll.h>
 #include <hal/nrf_lrcconf.h>
 #include <hal/nrf_spu.h>
+#include <hal/nrf_memconf.h>
 #include <soc/nrfx_coredep.h>
+
+#if defined(NRF_APPLICATION)
+#define RAMBLOCK_CONTROL_BIT_ICACHE MEMCONF_POWER_CONTROL_MEM1_Pos
+#define RAMBLOCK_CONTROL_BIT_DCACHE MEMCONF_POWER_CONTROL_MEM2_Pos
+#define RAMBLOCK_POWER_ID	    0
+#define RAMBLOCK_CONTROL_OFF	    0
+#define RAMBLOCK_RET_MASK	    (MEMCONF_POWER_RET_MEM0_Msk)
+#define RAMBLOCK_RET_BIT_ICACHE	    MEMCONF_POWER_RET_MEM1_Pos
+#define RAMBLOCK_RET_BIT_DCACHE	    MEMCONF_POWER_RET_MEM2_Pos
+#elif defined(NRF_RADIOCORE)
+#define RAMBLOCK_CONTROL_BIT_ICACHE MEMCONF_POWER_CONTROL_MEM6_Pos
+#define RAMBLOCK_CONTROL_BIT_DCACHE MEMCONF_POWER_CONTROL_MEM7_Pos
+#define RAMBLOCK_POWER_ID	    0
+#define RAMBLOCK_CONTROL_OFF	    0
+#define RAMBLOCK_RET_MASK	    (MEMCONF_POWER_RET_MEM0_Msk | MEMCONF_POWER_RET_MEM1_Msk | \
+				     MEMCONF_POWER_RET_MEM2_Msk | MEMCONF_POWER_RET_MEM3_Msk | \
+				     MEMCONF_POWER_RET_MEM4_Msk | MEMCONF_POWER_RET_MEM5_Msk | \
+				     MEMCONF_POWER_RET_MEM8_Msk)
+#define RAMBLOCK_RET2_MASK	    (MEMCONF_POWER_RET2_MEM0_Msk | MEMCONF_POWER_RET2_MEM1_Msk | \
+				     MEMCONF_POWER_RET2_MEM2_Msk | MEMCONF_POWER_RET2_MEM3_Msk | \
+				     MEMCONF_POWER_RET2_MEM4_Msk | MEMCONF_POWER_RET2_MEM5_Msk | \
+				     MEMCONF_POWER_RET2_MEM8_Msk)
+#define RAMBLOCK_RET_BIT_ICACHE	    MEMCONF_POWER_RET_MEM6_Pos
+#define RAMBLOCK_RET_BIT_DCACHE	    MEMCONF_POWER_RET_MEM7_Pos
+#define RAMBLOCK_RET2_BIT_ICACHE    MEMCONF_POWER_RET2_MEM6_Pos
+#define RAMBLOCK_RET2_BIT_DCACHE    MEMCONF_POWER_RET2_MEM7_Pos
+#else
+#error "Unsupported domain."
+#endif
 
 LOG_MODULE_REGISTER(soc, CONFIG_SOC_LOG_LEVEL);
 
@@ -46,11 +76,32 @@ static void power_domain_init(void)
 	 *  WFI the power domain will be correctly retained.
 	 */
 
-	nrf_lrcconf_poweron_force_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_MAIN, true);
-	nrf_lrcconf_poweron_force_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_DOMAIN_0, true);
+	nrf_lrcconf_poweron_force_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_MAIN,
+			!IS_ENABLED(CONFIG_SOC_NRF54H20_CPURAD));
+	nrf_lrcconf_poweron_force_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_DOMAIN_0,
+			!IS_ENABLED(CONFIG_SOC_NRF54H20_CPURAD));
 
 	nrf_lrcconf_retain_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_MAIN, true);
 	nrf_lrcconf_retain_set(NRF_LRCCONF010, NRF_LRCCONF_POWER_DOMAIN_0, true);
+	nrf_memconf_ramblock_ret_enable_set(NRF_MEMCONF, 0, RAMBLOCK_RET_BIT_ICACHE, false);
+	nrf_memconf_ramblock_ret_enable_set(NRF_MEMCONF, 0, RAMBLOCK_RET_BIT_DCACHE, false);
+	nrf_memconf_ramblock_ret_enable_set(NRF_MEMCONF, 1, RAMBLOCK_RET_BIT_ICACHE, false);
+	nrf_memconf_ramblock_ret_enable_set(NRF_MEMCONF, 1, RAMBLOCK_RET_BIT_DCACHE, false);
+#if defined(RAMBLOCK_RET2_BIT_ICACHE)
+	nrf_memconf_ramblock_ret2_enable_set(NRF_MEMCONF, 0, RAMBLOCK_RET2_BIT_ICACHE, false);
+	nrf_memconf_ramblock_ret2_enable_set(NRF_MEMCONF, 1, RAMBLOCK_RET2_BIT_ICACHE, false);
+#endif
+#if defined(RAMBLOCK_RET2_BIT_DCACHE)
+	nrf_memconf_ramblock_ret2_enable_set(NRF_MEMCONF, 0, RAMBLOCK_RET2_BIT_DCACHE, false);
+	nrf_memconf_ramblock_ret2_enable_set(NRF_MEMCONF, 1, RAMBLOCK_RET2_BIT_DCACHE, false);
+#endif
+	nrf_memconf_ramblock_ret_mask_enable_set(NRF_MEMCONF, 0, RAMBLOCK_RET_MASK, true);
+	nrf_memconf_ramblock_ret_mask_enable_set(NRF_MEMCONF, 1, RAMBLOCK_RET_MASK, true);
+#if defined(RAMBLOCK_RET2_MASK)
+	/* TODO: Use nrf_memconf_ramblock_ret2_mask_enable_set() function when it will be privided by HAL. **/
+	NRF_MEMCONF->POWER[0].RET2 |= RAMBLOCK_RET2_MASK;
+	NRF_MEMCONF->POWER[1].RET2 |= RAMBLOCK_RET2_MASK;
+#endif
 }
 
 static int trim_hsfll(void)

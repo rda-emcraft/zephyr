@@ -8,16 +8,22 @@
 
 #if defined(CONFIG_SOC_SERIES_NRF51X) || defined(CONFIG_SOC_SERIES_NRF52X)
 #include <hal/nrf_power.h>
-#else
+#elif defined(CONFIG_SOC_SERIES_NRF53X) || defined(CONFIG_SOC_SERIES_NRF91X)
 #include <hal/nrf_regulators.h>
+#elif defined(CONFIG_SOC_SERIES_NRF54HX)
+#include <power.h>
+#else
+#error "Unsupported SoC"
 #endif
 
 void z_sys_poweroff(void)
 {
 #if defined(CONFIG_SOC_SERIES_NRF51X) || defined(CONFIG_SOC_SERIES_NRF52X)
 	nrf_power_system_off(NRF_POWER);
-#else
+#elif defined(CONFIG_SOC_SERIES_NRF53X) || defined(CONFIG_SOC_SERIES_NRF91X)
 	nrf_regulators_system_off(NRF_REGULATORS);
+#elif defined(CONFIG_SOC_SERIES_NRF54HX)
+	nrf_poweroff();
 #endif
 
 	CODE_UNREACHABLE;
