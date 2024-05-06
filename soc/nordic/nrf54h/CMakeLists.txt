@@ -7,6 +7,11 @@ endif()
 
 zephyr_library_sources_ifdef(CONFIG_CPU_HAS_CUSTOM_FIXED_SOC_MPU_REGIONS mpu_regions.c)
 
+if(CONFIG_PM OR CONFIG_POWEROFF)
+    zephyr_library_sources(power.c)
+endif()
+zephyr_library_sources_ifdef(CONFIG_PM_S2RAM pm_s2ram.c)
+
 zephyr_include_directories(.)
 
 # Ensure that image size aligns with 16 bytes so that MRAMC finalizes all writes
