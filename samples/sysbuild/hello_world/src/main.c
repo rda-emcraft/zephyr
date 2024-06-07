@@ -4,10 +4,15 @@
  */
 
 #include <zephyr/sys/printk.h>
+#include <zephyr/kernel.h>
 
 int main(void)
 {
-	printk("Hello world from %s\n", CONFIG_BOARD_TARGET);
+	while(1) {
+		printk("Hello world from %s\n", CONFIG_BOARD_TARGET);
+		k_sleep(K_MSEC(2000));
+	}
+
 
 	return 0;
 }
