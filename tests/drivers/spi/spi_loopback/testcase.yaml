@@ -210,3 +210,8 @@ tests:
     platform_allow:
       - s32z2xxdc2/s32z270/rtu0
       - s32z2xxdc2/s32z270/rtu1
+  drivers.spi.nrf_pm_runtime:
+    extra_configs:
+      - CONFIG_PM_DEVICE=y
+      - CONFIG_PM_DEVICE_RUNTIME=y
+    filter: CONFIG_SOC_FAMILY_NORDIC_NRF
